@@ -224,12 +224,5 @@
             <version>${scalatest.version}</version>
         </dependency>
 
-        <!-- spark measure -->
-        <dependency>
-            <groupId>ch.cern.sparkmeasure</groupId>
-            <artifactId>spark-measure_2.12</artifactId>
-            <version>0.27</version>
-        </dependency>
-
     </dependencies>
 </project>

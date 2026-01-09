@@ -32,8 +32,6 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 
-import ch.cern.sparkmeasure._
-
 class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
     extends Writer[RawSink]
     with Serializable
@@ -49,28 +47,15 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
       SparkCompanyGenerator(DatagenParams.numCompanies, config, blockSize)
     val mediumRdd =
       SparkMediumGenerator(DatagenParams.numMediums, config, blockSize)
-    log.info(
-      s"[Simulation] Person RDD partitions: ${personRdd.getNumPartitions}, "
-        + s"Company RDD partitions: ${companyRdd.getNumPartitions}, "
-        + s"Medium RDD partitions: ${mediumRdd.getNumPartitions}"
-    )
 
     val personWithAccGuaLoan = activityGenerator.personActivitiesEvent(personRdd)
     val companyWithAccGuaLoan = activityGenerator.companyActivitiesEvent(companyRdd)
-    // log.info(
-    //   s"[Simulation] personWithAccGuaLoan partitions: ${personWithAccGuaLoan.getNumPartitions}, "
-    //     + s"companyWithAccGuaLoan partitions: ${companyWithAccGuaLoan.getNumPartitions}"
-    // )
     val companyRddAfterInvest = activityGenerator.investEvent(personRdd, companyRdd)
 
     val accountRdd = mergeAccountsAndShuffleDegrees(personWithAccGuaLoan, companyWithAccGuaLoan)
     val mediumWithSignInRdd = activityGenerator.mediumActivitesEvent(mediumRdd, accountRdd)
     mediumWithSignInRdd.cache()
     val accountWithTransferWithdraw = activityGenerator.accountActivitiesEvent(accountRdd)
-    // log.info(
-    //   s"[Simulation] Account RDD partitions: ${accountRdd.getNumPartitions}"
-    //     + s"[Simulation] signIn RDD partitions: ${mediumWithSignInRdd.getNumPartitions}"
-    // )
 
     val loanRdd = mergeLoans(personWithAccGuaLoan, companyWithAccGuaLoan)
     val loanWithActivitiesRdd = activityGenerator.afterLoanSubEvents(loanRdd, accountRdd)

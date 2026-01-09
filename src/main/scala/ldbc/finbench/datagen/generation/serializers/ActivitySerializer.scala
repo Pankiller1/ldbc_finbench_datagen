@@ -365,10 +365,6 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
             )
           }
         }
-        // log.info(
-        //   "[Invest] PersonInvestCompany count: " + rawPersonInvestCompany
-        //     .count()
-        // )
         spark
           .createDataFrame(rawPersonInvestCompany)
           .write
@@ -388,10 +384,6 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
             )
           }
         }
-        // log.info(
-        //   "[Invest] CompanyInvestCompany count: " + rawCompanyInvestCompany
-        //     .count()
-        // )
         spark
           .createDataFrame(rawCompanyInvestCompany)
           .write

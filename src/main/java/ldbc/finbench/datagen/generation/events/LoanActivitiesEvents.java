@@ -43,28 +43,13 @@ public class LoanActivitiesEvents implements Serializable {
     private final Random amountRandom;
     private final List<Consumer<Loan>> consumers;
     private List<Account> targetAccounts;
-    // 显式记录每个 Consumer 对应的子事件类型
-    private final Map<Consumer<Loan>, String> consumerNames;
     // Note: Don't make it static. It will be accessed by different Spark workers, which makes multiplicity wrong.
     private final Map<String, AtomicLong> multiplicityMap;
     private int targetAccountsSize;
 
-    // public LoanActivitiesEvents() {
-    //     multiplicityMap = new ConcurrentHashMap<>();
-    //     randomFarm = new RandomGeneratorFarm();
-    //     indexRandom = new Random(DatagenParams.defaultSeed);
-    //     actionRandom = new Random(DatagenParams.defaultSeed);
-    //     amountRandom = new Random(DatagenParams.defaultSeed);
-    //     targetAccountsSize = 0;
-    //     // Add all defined subevents to the consumers list
-    //     consumers = Arrays.asList(this::depositSubEvent,
-    //                               this::repaySubEvent,
-    //                               this::transferSubEvent);
-    // }
 
     public LoanActivitiesEvents() {
         multiplicityMap = new ConcurrentHashMap<>();
-        consumerNames = new ConcurrentHashMap<>();
         randomFarm = new RandomGeneratorFarm();
         indexRandom = new Random(DatagenParams.defaultSeed);
         actionRandom = new Random(DatagenParams.defaultSeed);
@@ -76,10 +61,6 @@ public class LoanActivitiesEvents implements Serializable {
         Consumer<Loan> transfer = this::transferSubEvent;
 
         consumers = Arrays.asList(deposit, repay, transfer);
-
-        consumerNames.put(deposit, "deposit");
-        consumerNames.put(repay, "repay");
-        consumerNames.put(transfer, "transfer");
     }
 
     public void resetState(int seed) {
@@ -131,25 +112,15 @@ public class LoanActivitiesEvents implements Serializable {
         Account target = targetAccounts.get(indexRandom.nextInt(targetAccountsSize));
         if (actionRandom.nextDouble() < 0.5) {
             if (!cannotTransfer(account, target)) {
-                Transfer.createLoanTransfer(
-                    randomFarm,
-                    account,
-                    target,
-                    loan,
-                    getMultiplicityIdAndInc(account, target),
-                    amountRandom.nextDouble() * DatagenParams.transferMaxAmount
-                );
+                Transfer.createLoanTransfer(randomFarm, account, target, loan,
+                                            getMultiplicityIdAndInc(account, target),
+                                            amountRandom.nextDouble() * DatagenParams.transferMaxAmount);
             }
         } else {
             if (!cannotTransfer(target, account)) {
-                Transfer.createLoanTransfer(
-                    randomFarm,
-                    target,
-                    account,
-                    loan,
-                    getMultiplicityIdAndInc(target, account),
-                    amountRandom.nextDouble() * DatagenParams.transferMaxAmount
-                );
+                Transfer.createLoanTransfer(randomFarm, target, account, loan,
+                                            getMultiplicityIdAndInc(target, account),
+                                            amountRandom.nextDouble() * DatagenParams.transferMaxAmount);
             }
         }
     }
@@ -159,9 +130,8 @@ public class LoanActivitiesEvents implements Serializable {
             || from.getCreationDate() + DatagenParams.activityDelta > to.getDeletionDate();
     }
 
-    public boolean cannotDeposit(Loan from, Account to) {  
-        return from.getBalance() == 0
-            || from.getCreationDate() + DatagenParams.activityDelta > to.getDeletionDate();
+    public boolean cannotDeposit(Loan from, Account to) {
+        return from.getBalance() == 0 || from.getCreationDate() + DatagenParams.activityDelta > to.getDeletionDate();
     }
 
     public boolean cannotRepay(Account from, Loan to) {

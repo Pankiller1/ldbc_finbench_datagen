@@ -16,14 +16,9 @@ OUTPUT_DIR=out
 # --conf "spark.storage.memoryFraction=0" \
 # --conf "spark.serializer=org.apache.spark.serializer.KryoSerializer" \
 
-if [ -d "${OUTPUT_DIR}" ]; then
-    rm -rf "${OUTPUT_DIR}"
-fi
-
 time spark-submit --master local[*] \
     --class ldbc.finbench.datagen.LdbcDatagen \
     --driver-memory 480g \
-    --packages ch.cern.sparkmeasure:spark-measure_2.12:0.27 \
     --conf "spark.default.parallelism=200" \
     --conf "spark.shuffle.compress=true" \
     --conf "spark.shuffle.spill.compress=true" \
@@ -41,7 +36,7 @@ time spark-submit --master local[*] \
 #time spark-submit --master local[*] \
 #    --class ldbc.finbench.datagen.LdbcDatagen \
 #    --driver-memory 400g \
-#    --conf "spark.default.parallelism=800" \ 
+#    --conf "spark.default.parallelism=800" \
 #    --conf "spark.shuffle.compress=true" \
 #    --conf "spark.shuffle.spill.compress=true" \
 #    --conf "spark.kryoserializer.buffer.max=512m" \
@@ -52,4 +47,3 @@ time spark-submit --master local[*] \
 #    ${LDBC_FINBENCH_DATAGEN_JAR} \
 #    --scale-factor 100 \
 #    --output-dir ${OUTPUT_DIR}
-
