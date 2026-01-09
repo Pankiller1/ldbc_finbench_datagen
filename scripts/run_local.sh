@@ -16,10 +16,15 @@ OUTPUT_DIR=out
 # --conf "spark.storage.memoryFraction=0" \
 # --conf "spark.serializer=org.apache.spark.serializer.KryoSerializer" \
 
+if [ -d "${OUTPUT_DIR}" ]; then
+    rm -rf "${OUTPUT_DIR}"
+fi
+
 time spark-submit --master local[*] \
     --class ldbc.finbench.datagen.LdbcDatagen \
     --driver-memory 480g \
-    --conf "spark.default.parallelism=500" \
+    --packages ch.cern.sparkmeasure:spark-measure_2.12:0.27 \
+    --conf "spark.default.parallelism=200" \
     --conf "spark.shuffle.compress=true" \
     --conf "spark.shuffle.spill.compress=true" \
     --conf "spark.serializer=org.apache.spark.serializer.KryoSerializer" \
@@ -29,14 +34,14 @@ time spark-submit --master local[*] \
     --conf "spark.driver.maxResultSize=0" \
     --conf "spark.executor.extraJavaOptions=-XX:+UseG1GC" \
     ${LDBC_FINBENCH_DATAGEN_JAR} \
-    --scale-factor 10 \
+    --scale-factor 100 \
     --output-dir ${OUTPUT_DIR}
 
 # currently works on SF100
 #time spark-submit --master local[*] \
 #    --class ldbc.finbench.datagen.LdbcDatagen \
 #    --driver-memory 400g \
-#    --conf "spark.default.parallelism=800" \
+#    --conf "spark.default.parallelism=800" \ 
 #    --conf "spark.shuffle.compress=true" \
 #    --conf "spark.shuffle.spill.compress=true" \
 #    --conf "spark.kryoserializer.buffer.max=512m" \

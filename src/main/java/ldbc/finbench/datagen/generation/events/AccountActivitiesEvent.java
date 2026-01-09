@@ -70,6 +70,7 @@ public class AccountActivitiesEvent implements Serializable {
         LinkedList<Integer> availableToAccountIds = getIndexList(accounts.size());
         maxSkippedCount = Math.min(maxSkippedCount, (int) (skippedRatio * accounts.size()));
 
+        int cardsize = cards.size();
         // Simplified version of transfer process
         //        for (int i = 0; i < accounts.size(); i++) {
         //            Account from = accounts.get(i);
@@ -109,6 +110,7 @@ public class AccountActivitiesEvent implements Serializable {
                     for (int mindex = 0; mindex < numTransfers; mindex++) {
                         Transfer.createTransfer(randomFarm, from, to, mindex);
                     }
+
                     if (to.getAvailableInDegree() == 0) {
                         availableToAccountIds.remove(j);
                         j--;
@@ -122,17 +124,16 @@ public class AccountActivitiesEvent implements Serializable {
                     break;
                 }
             }
+
             // WITHDRAW: account withdraw to cards
             if (pickAccountForWithdrawal.nextDouble() < DatagenParams.accountWithdrawFraction) {
                 for (int count = 0; count < DatagenParams.maxWithdrawals; count++) {
-                    Account to = cards.get(randIndex.nextInt(cards.size()));
+                    Account to = cards.get(randIndex.nextInt(cardsize));
                     if (!cannotWithdraw(from, to)) {
                         Withdraw.createWithdraw(randomFarm, from, to, getMultiplicityIdAndInc(from, to));
                     }
-
                 }
             }
-
         }
         return accounts;
     }

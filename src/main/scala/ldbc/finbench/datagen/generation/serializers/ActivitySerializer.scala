@@ -221,7 +221,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
   ): Seq[Future[Unit]] = {
 
     val futures = Seq(
-      SparkUI.jobAsync("Write medum", "Write Medium") {
+      SparkUI.jobAsync("Write medium", "Write Medium") {
         val rawMedium = media.map { m: Medium =>
           MediumRaw(
             m.getMediumId,
@@ -365,10 +365,10 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
             )
           }
         }
-        log.info(
-          "[Invest] PersonInvestCompany count: " + rawPersonInvestCompany
-            .count()
-        )
+        // log.info(
+        //   "[Invest] PersonInvestCompany count: " + rawPersonInvestCompany
+        //     .count()
+        // )
         spark
           .createDataFrame(rawPersonInvestCompany)
           .write
@@ -388,10 +388,10 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
             )
           }
         }
-        log.info(
-          "[Invest] CompanyInvestCompany count: " + rawCompanyInvestCompany
-            .count()
-        )
+        // log.info(
+        //   "[Invest] CompanyInvestCompany count: " + rawCompanyInvestCompany
+        //     .count()
+        // )
         spark
           .createDataFrame(rawCompanyInvestCompany)
           .write

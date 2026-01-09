@@ -46,10 +46,11 @@ public class SignInEvent implements Serializable {
         Random accountsToSignRand = randomFarm.get(RandomGeneratorFarm.Aspect.NUM_ACCOUNTS_SIGNIN_PER_MEDIUM);
         Random multiplicityRandom = randomFarm.get(RandomGeneratorFarm.Aspect.MULTIPLICITY_SIGNIN);
         int numAccountsToSign = accountsToSignRand.nextInt(DatagenParams.maxAccountToSignIn);
+        int accountsSize = accounts.size();
 
         for (Medium medium : mediums) {
             for (int i = 0; i < Math.max(1, numAccountsToSign); i++) {
-                Account accountToSign = accounts.get(randIndex.nextInt(accounts.size()));
+                Account accountToSign = accounts.get(randIndex.nextInt(accountsSize));
                 if (cannotSignIn(medium, accountToSign)) {
                     continue;
                 }

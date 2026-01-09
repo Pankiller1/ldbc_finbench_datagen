@@ -42,12 +42,13 @@ public class PersonInvestEvent implements Serializable {
     public List<Company> personInvestPartition(List<Person> investors, List<Company> targets) {
         Random numInvestorsRand = randomFarm.get(RandomGeneratorFarm.Aspect.NUMS_PERSON_INVEST);
         Random chooseInvestorRand = randomFarm.get(RandomGeneratorFarm.Aspect.CHOOSE_PERSON_INVESTOR);
+        int investorsize = investors.size();
         for (Company target : targets) {
             int numInvestors = numInvestorsRand.nextInt(
                 DatagenParams.maxInvestors - DatagenParams.minInvestors + 1
             ) + DatagenParams.minInvestors;
             for (int i = 0; i < numInvestors; i++) {
-                int index = chooseInvestorRand.nextInt(investors.size());
+                int index = chooseInvestorRand.nextInt(investorsize);
                 Person investor = investors.get(index);
                 if (cannotInvest(investor, target)) {
                     continue;
