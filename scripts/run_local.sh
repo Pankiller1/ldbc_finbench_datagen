@@ -19,7 +19,7 @@ OUTPUT_DIR=out
 time spark-submit --master local[*] \
     --class ldbc.finbench.datagen.LdbcDatagen \
     --driver-memory 480g \
-    --conf "spark.default.parallelism=200" \
+    --conf "spark.default.parallelism=500" \
     --conf "spark.shuffle.compress=true" \
     --conf "spark.shuffle.spill.compress=true" \
     --conf "spark.serializer=org.apache.spark.serializer.KryoSerializer" \
@@ -29,7 +29,7 @@ time spark-submit --master local[*] \
     --conf "spark.driver.maxResultSize=0" \
     --conf "spark.executor.extraJavaOptions=-XX:+UseG1GC" \
     ${LDBC_FINBENCH_DATAGEN_JAR} \
-    --scale-factor 100 \
+    --scale-factor 10 \
     --output-dir ${OUTPUT_DIR}
 
 # currently works on SF100

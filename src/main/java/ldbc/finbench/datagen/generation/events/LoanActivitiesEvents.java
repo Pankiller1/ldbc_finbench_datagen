@@ -47,7 +47,6 @@ public class LoanActivitiesEvents implements Serializable {
     private final Map<String, AtomicLong> multiplicityMap;
     private int targetAccountsSize;
 
-
     public LoanActivitiesEvents() {
         multiplicityMap = new ConcurrentHashMap<>();
         randomFarm = new RandomGeneratorFarm();
@@ -55,7 +54,6 @@ public class LoanActivitiesEvents implements Serializable {
         actionRandom = new Random(DatagenParams.defaultSeed);
         amountRandom = new Random(DatagenParams.defaultSeed);
 
-        // 必须先保存为变量，保证 Consumer 实例一致
         Consumer<Loan> deposit = this::depositSubEvent;
         Consumer<Loan> repay = this::repaySubEvent;
         Consumer<Loan> transfer = this::transferSubEvent;
