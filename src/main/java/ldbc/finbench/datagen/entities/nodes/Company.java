@@ -17,6 +17,7 @@
 package ldbc.finbench.datagen.entities.nodes;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
@@ -46,6 +47,8 @@ public class Company implements Serializable {
     private final LinkedHashSet<CompanyGuaranteeCompany> guaranteeSrc;
     private final LinkedHashSet<CompanyGuaranteeCompany> guaranteeDst;
     private final List<CompanyApplyLoan> companyApplyLoans;
+    private final List<Account> accounts;
+    private final List<Loan> loans;
 
     public Company() {
         companyOwnAccounts = new LinkedList<>();
@@ -54,6 +57,8 @@ public class Company implements Serializable {
         guaranteeSrc = new LinkedHashSet<>();
         guaranteeDst = new LinkedHashSet<>();
         companyApplyLoans = new LinkedList<>();
+        accounts = new ArrayList<>();
+        loans = new LinkedList<>();
     }
 
     @Override
@@ -93,6 +98,14 @@ public class Company implements Serializable {
 
     public List<CompanyOwnAccount> getCompanyOwnAccounts() {
         return companyOwnAccounts;
+    }
+
+    public List<Account> getAccount() {
+        return accounts;
+    }
+
+    public void addAccount(Account account) {
+        this.accounts.add(account);
     }
 
     public List<PersonInvestCompany> getPersonInvestCompanies() {
@@ -148,6 +161,14 @@ public class Company implements Serializable {
 
     public List<CompanyApplyLoan> getCompanyApplyLoans() {
         return companyApplyLoans;
+    }
+
+    public List<Loan> getLoan() {
+        return loans;
+    }
+
+    public void addLoan(Loan loan) {
+        this.loans.add(loan);
     }
 
     public long getCreationDate() {

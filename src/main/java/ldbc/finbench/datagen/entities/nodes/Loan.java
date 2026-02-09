@@ -35,6 +35,9 @@ public class Loan implements Serializable, Comparable<Loan> {
     private PersonOrCompany ownerType;
     private Person ownerPerson;
     private Company ownerCompany;
+    private long personId;
+    private long companyId;
+    private Account[] accounts;
     private final List<Deposit> deposits;
     private final List<Repay> repays;
     private final List<Transfer> loanTransfers;
@@ -154,12 +157,36 @@ public class Loan implements Serializable, Comparable<Loan> {
         this.ownerPerson = ownerPerson;
     }
 
+    public void setOwnerPersonId(long personId) {
+        this.personId = personId;
+    }
+
+    public long getOwnerPersonId() {
+        return personId;
+    }
+
     public Company getOwnerCompany() {
         return ownerCompany;
     }
 
     public void setOwnerCompany(Company ownerCompany) {
         this.ownerCompany = ownerCompany;
+    }
+
+    public void setOwnerCompanyId(long companyId) {
+        this.companyId = companyId;
+    }
+
+    public long getOwnerCompanyId() {
+        return companyId;
+    }
+
+    public Account[] getAccounts() {
+        return accounts;
+    }
+
+    public void setAccounts(Account[] accounts) {
+        this.accounts = accounts;
     }
 
     public String getUsage() {

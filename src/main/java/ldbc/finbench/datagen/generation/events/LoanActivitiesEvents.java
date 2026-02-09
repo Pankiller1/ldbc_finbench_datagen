@@ -138,12 +138,7 @@ public class LoanActivitiesEvents implements Serializable {
     }
 
     private Account getAccount(Loan loan) {
-        if (loan.getOwnerType() == PersonOrCompany.PERSON) {
-            List<PersonOwnAccount> poa = loan.getOwnerPerson().getPersonOwnAccounts();
-            return poa.get(indexRandom.nextInt(poa.size())).getAccount();
-        } else {
-            List<CompanyOwnAccount> coa = loan.getOwnerCompany().getCompanyOwnAccounts();
-            return coa.get(indexRandom.nextInt(coa.size())).getAccount();
-        }
+        Account[] accounts = loan.getAccounts();
+        return accounts[indexRandom.nextInt(accounts.length)];
     }
 }

@@ -17,7 +17,9 @@
 package ldbc.finbench.datagen.entities.edges;
 
 import java.io.Serializable;
+import java.util.List;
 import ldbc.finbench.datagen.entities.DynamicActivity;
+import ldbc.finbench.datagen.entities.nodes.Account;
 import ldbc.finbench.datagen.entities.nodes.Company;
 import ldbc.finbench.datagen.entities.nodes.Loan;
 import ldbc.finbench.datagen.entities.nodes.PersonOrCompany;
@@ -27,7 +29,6 @@ import ldbc.finbench.datagen.util.RandomGeneratorFarm;
 public class CompanyApplyLoan implements DynamicActivity, Serializable {
     private final long companyId;
     private final long loanId;
-    private final Loan loan; // TODO: can be removed
     private final long creationDate;
     private final long deletionDate;
     private final boolean isExplicitlyDeleted;
@@ -35,29 +36,41 @@ public class CompanyApplyLoan implements DynamicActivity, Serializable {
     private final String comment;
     private final double loanAmount;
 
-    public CompanyApplyLoan(Company company, Loan loan, long creationDate, long deletionDate,
-                            boolean isExplicitlyDeleted, String organization, String comment) {
-        this.companyId = company.getCompanyId();
-        this.loanId = loan.getLoanId();
-        this.loan = loan;
+    public CompanyApplyLoan(long companyId, long loanId, long creationDate, long deletionDate,
+                            boolean isExplicitlyDeleted, String organization, String comment, double loanAmount) {
+        this.companyId = companyId;
+        this.loanId = loanId;
         this.creationDate = creationDate;
         this.deletionDate = deletionDate;
         this.isExplicitlyDeleted = isExplicitlyDeleted;
         this.organization = organization;
         this.comment = comment;
-        this.loanAmount = loan.getLoanAmount();
+        this.loanAmount = loanAmount;
     }
 
     public static void createCompanyApplyLoan(RandomGeneratorFarm farm, long creationDate, Company company, Loan loan) {
+        loan.setOwnerType(PersonOrCompany.COMPANY);
+        loan.setOwnerCompanyId(company.getCompanyId());
+        company.addLoan(loan);
+
+        List<Account> coa = company.getAccount();
+        loan.setAccounts(coa.toArray(new Account[0]));
+
         String organization = Dictionaries.loanOrganizations.getUniformDistRandomText(
             farm.get(RandomGeneratorFarm.Aspect.COMPANY_APPLY_LOAN_ORGANIZATION));
         String comment =
             Dictionaries.randomTexts.getUniformDistRandomTextForComments(
                 farm.get(RandomGeneratorFarm.Aspect.COMMON_COMMENT));
-        loan.setOwnerType(PersonOrCompany.COMPANY);
-        loan.setOwnerCompany(company);
+
         CompanyApplyLoan companyApplyLoan =
-            new CompanyApplyLoan(company, loan, creationDate, 0, false, organization, comment);
+            new CompanyApplyLoan(company.getCompanyId(),
+                                 loan.getLoanId(),
+                                 creationDate,
+                                 0,
+                                 false,
+                                 organization,
+                                 comment,
+                                 loan.getLoanAmount());
         company.getCompanyApplyLoans().add(companyApplyLoan);
     }
 
@@ -67,10 +80,6 @@ public class CompanyApplyLoan implements DynamicActivity, Serializable {
 
     public long getLoanId() {
         return loanId;
-    }
-
-    public Loan getLoan() {
-        return loan;
     }
 
     @Override

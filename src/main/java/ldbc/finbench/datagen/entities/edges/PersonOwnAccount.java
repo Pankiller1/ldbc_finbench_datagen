@@ -27,17 +27,15 @@ import ldbc.finbench.datagen.util.RandomGeneratorFarm;
 public class PersonOwnAccount implements DynamicActivity, Serializable {
     private final long personId;
     private final long accountId;
-    private final Account account; // TODO: can be removed
     private final long creationDate;
     private final long deletionDate;
     private final boolean isExplicitlyDeleted;
     private final String comment;
 
-    public PersonOwnAccount(Person person, Account account, long creationDate, long deletionDate,
+    public PersonOwnAccount(long personId, long accountId, long creationDate, long deletionDate,
                             boolean isExplicitlyDeleted, String comment) {
-        this.personId = person.getPersonId();
-        this.accountId = account.getAccountId();
-        this.account = account; // TODO: can be removed
+        this.personId = personId;
+        this.accountId = accountId;
         this.creationDate = creationDate;
         this.deletionDate = deletionDate;
         this.isExplicitlyDeleted = isExplicitlyDeleted;
@@ -48,11 +46,15 @@ public class PersonOwnAccount implements DynamicActivity, Serializable {
                                               long creationDate) {
         // Delete when account is deleted
         account.setOwnerType(PersonOrCompany.PERSON);
-        account.setPersonOwner(person);
+        account.setPersonId(person.getPersonId());
+        person.addAccount(account);
+        
         String comment =
             Dictionaries.randomTexts.getUniformDistRandomTextForComments(
                 farm.get(RandomGeneratorFarm.Aspect.COMMON_COMMENT));
-        PersonOwnAccount personOwnAccount = new PersonOwnAccount(person, account, creationDate,
+        PersonOwnAccount personOwnAccount = new PersonOwnAccount(person.getPersonId(),
+                                                                 account.getAccountId(),
+                                                                 creationDate,
                                                                  account.getDeletionDate(),
                                                                  account.isExplicitlyDeleted(),
                                                                  comment);
@@ -84,9 +86,5 @@ public class PersonOwnAccount implements DynamicActivity, Serializable {
 
     public String getComment() {
         return comment;
-    }
-
-    public Account getAccount() {
-        return account;
     }
 }

@@ -79,9 +79,9 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
       companies: RDD[Company]
   ): RDD[Account] = {
     val personAccounts =
-      persons.flatMap(_.getPersonOwnAccounts.asScala.map(_.getAccount))
+      persons.flatMap(_.getAccount.asScala)
     val companyAccounts =
-      companies.flatMap(_.getCompanyOwnAccounts.asScala.map(_.getAccount))
+      companies.flatMap(_.getAccount.asScala)
     personAccounts
       .union(companyAccounts)
       .mapPartitions(iter => shuffleDegrees(iter.toList).iterator)
@@ -102,9 +102,9 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
       companies: RDD[Company]
   ): RDD[Loan] = {
     val personLoans =
-      persons.flatMap(_.getPersonApplyLoans.asScala.map(_.getLoan))
+      persons.flatMap(_.getLoan.asScala)
     val companyLoans =
-      companies.flatMap(_.getCompanyApplyLoans.asScala.map(_.getLoan))
+      companies.flatMap(_.getLoan.asScala)
     personLoans.union(companyLoans)
   }
 }
