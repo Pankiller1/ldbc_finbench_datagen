@@ -59,7 +59,6 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
 
     val loanRdd = mergeLoans(personWithAccGuaLoan, companyWithAccGuaLoan)
     val loanWithActivitiesRdd = activityGenerator.afterLoanSubEvents(loanRdd, accountRdd)
-    loanWithActivitiesRdd.cache()
     
     // Serialize
     val allFutures = Seq(

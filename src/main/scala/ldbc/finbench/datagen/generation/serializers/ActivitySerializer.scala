@@ -65,9 +65,9 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       },
       SparkUI.jobAsync("Write Person own account", "Write Person own account") {
         val rawPersonOwnAccount = self.flatMap { p =>
-          p.getPersonOwnAccounts.asScala.map { poa =>
+          p.getOwnAccounts.asScala.map { poa =>
             PersonOwnAccountRaw(
-              poa.getPersonId,
+              poa.getOwnerId,
               poa.getAccountId,
               poa.getCreationDate,
               poa.getDeletionDate,
@@ -104,9 +104,9 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       },
       SparkUI.jobAsync("Write Person apply loan", "Write Person apply loan") {
         val rawPersonLoan = self.flatMap { p =>
-          p.getPersonApplyLoans.asScala.map { pal: PersonApplyLoan =>
+          p.getApplyLoans.asScala.map { pal =>
             PersonApplyLoanRaw(
-              pal.getPersonId,
+              pal.getOwnerId,
               pal.getLoanId,
               formattedDouble(pal.getLoanAmount),
               pal.getCreationDate,
@@ -155,9 +155,9 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       SparkUI
         .jobAsync("Write Company own account", "Write Company own account") {
           val rawCompanyOwnAccount = companiesRDD.flatMap { c =>
-            c.getCompanyOwnAccounts.asScala.map { coa =>
+            c.getOwnAccounts.asScala.map { coa =>
               CompanyOwnAccountRaw(
-                coa.getCompanyId,
+                coa.getOwnerId,
                 coa.getAccountId,
                 coa.getCreationDate,
                 coa.getDeletionDate,
@@ -194,9 +194,9 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       },
       SparkUI.jobAsync("Write Company apply loan", "Write Company apply loan") {
         val rawCompanyLoan = companiesRDD.flatMap { c =>
-          c.getCompanyApplyLoans.asScala.map { cal: CompanyApplyLoan =>
+          c.getApplyLoans.asScala.map { cal =>
             CompanyApplyLoanRaw(
-              cal.getCompanyId,
+              cal.getOwnerId,
               cal.getLoanId,
               formattedDouble(cal.getLoanAmount),
               cal.getCreationDate,

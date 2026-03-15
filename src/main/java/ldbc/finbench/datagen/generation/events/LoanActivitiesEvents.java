@@ -16,7 +16,6 @@
 
 package ldbc.finbench.datagen.generation.events;
 
-// import com.esotericsoftware.minlog.Log;
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.List;
@@ -25,9 +24,7 @@ import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
-import ldbc.finbench.datagen.entities.edges.CompanyOwnAccount;
 import ldbc.finbench.datagen.entities.edges.Deposit;
-import ldbc.finbench.datagen.entities.edges.PersonOwnAccount;
 import ldbc.finbench.datagen.entities.edges.Repay;
 import ldbc.finbench.datagen.entities.edges.Transfer;
 import ldbc.finbench.datagen.entities.nodes.Account;
@@ -42,10 +39,11 @@ public class LoanActivitiesEvents implements Serializable {
     private final Random actionRandom;
     private final Random amountRandom;
     private final List<Consumer<Loan>> consumers;
-    private List<Account> targetAccounts;
+    private Account[] targetAccounts;
+    private int targetAccountsSize;
+
     // Note: Don't make it static. It will be accessed by different Spark workers, which makes multiplicity wrong.
     private final Map<String, AtomicLong> multiplicityMap;
-    private int targetAccountsSize;
 
     public LoanActivitiesEvents() {
         multiplicityMap = new ConcurrentHashMap<>();
@@ -70,8 +68,8 @@ public class LoanActivitiesEvents implements Serializable {
 
     public List<Loan> afterLoanApplied(List<Loan> loans, List<Account> targets, int blockId) {
         resetState(blockId);
-        targetAccounts = targets;
-        targetAccountsSize = targetAccounts.size();
+        targetAccounts = targets.toArray(new Account[0]);
+        targetAccountsSize = targetAccounts.length;
         for (Loan loan : loans) {
             int count = 0;
             while (count++ < DatagenParams.numLoanActions) {
@@ -107,7 +105,7 @@ public class LoanActivitiesEvents implements Serializable {
 
     private void transferSubEvent(Loan loan) {
         Account account = getAccount(loan);
-        Account target = targetAccounts.get(indexRandom.nextInt(targetAccountsSize));
+        Account target = targetAccounts[indexRandom.nextInt(targetAccountsSize)];
         if (actionRandom.nextDouble() < 0.5) {
             if (!cannotTransfer(account, target)) {
                 Transfer.createLoanTransfer(randomFarm, account, target, loan,

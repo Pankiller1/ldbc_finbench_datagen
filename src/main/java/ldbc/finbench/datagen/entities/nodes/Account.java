@@ -41,8 +41,6 @@ public class Account implements Serializable {
     private long maxOutDegree; // max out degree before merging
     private boolean isBlocked;
     private PersonOrCompany ownerType;
-    private Person personOwner;
-    private Company companyOwner;
     private long personId;
     private long companyId;
     private boolean isExplicitlyDeleted;
@@ -182,20 +180,12 @@ public class Account implements Serializable {
         isExplicitlyDeleted = explicitlyDeleted;
     }
 
-    public void setPersonOwner(Person personOwner) {
-        this.personOwner = personOwner;
-    }
-
     public void setPersonId(long personId) {
         this.personId = personId;
     }
 
     public long getPersonId() {
         return personId;
-    }
-
-    public void setCompanyOwner(Company companyOwner) {
-        this.companyOwner = companyOwner;
     }
 
     public void setCompanyId(long companyId) {
