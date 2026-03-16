@@ -29,6 +29,7 @@ import ldbc.finbench.datagen.util.RandomGeneratorFarm;
 public class SignInEvent implements Serializable {
     private final RandomGeneratorFarm randomFarm;
     private final Random randIndex;
+    private Account[] accountsArray;
 
     public SignInEvent() {
         randomFarm = new RandomGeneratorFarm();
@@ -42,15 +43,15 @@ public class SignInEvent implements Serializable {
 
     public List<Medium> signIn(List<Medium> mediums, List<Account> accounts, int blockId) {
         resetState(blockId);
-
+        accountsArray = accounts.toArray(new Account[0]);
+        int accountsSize = accountsArray.length;
         Random accountsToSignRand = randomFarm.get(RandomGeneratorFarm.Aspect.NUM_ACCOUNTS_SIGNIN_PER_MEDIUM);
         Random multiplicityRandom = randomFarm.get(RandomGeneratorFarm.Aspect.MULTIPLICITY_SIGNIN);
         int numAccountsToSign = accountsToSignRand.nextInt(DatagenParams.maxAccountToSignIn);
-        int accountsSize = accounts.size();
 
         for (Medium medium : mediums) {
             for (int i = 0; i < Math.max(1, numAccountsToSign); i++) {
-                Account accountToSign = accounts.get(randIndex.nextInt(accountsSize));
+                Account accountToSign = accountsArray[randIndex.nextInt(accountsSize)];
                 if (cannotSignIn(medium, accountToSign)) {
                     continue;
                 }

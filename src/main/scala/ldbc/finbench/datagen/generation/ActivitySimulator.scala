@@ -54,7 +54,6 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
 
     val accountRdd = mergeAccountsAndShuffleDegrees(personWithAccGuaLoan, companyWithAccGuaLoan)
     val mediumWithSignInRdd = activityGenerator.mediumActivitesEvent(mediumRdd, accountRdd)
-    mediumWithSignInRdd.cache()
     val accountWithTransferWithdraw = activityGenerator.accountActivitiesEvent(accountRdd)
 
     val loanRdd = mergeLoans(personWithAccGuaLoan, companyWithAccGuaLoan)
