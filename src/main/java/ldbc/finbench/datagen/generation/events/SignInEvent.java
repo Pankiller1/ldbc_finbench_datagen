@@ -41,9 +41,9 @@ public class SignInEvent implements Serializable {
         randIndex.setSeed(seed);
     }
 
-    public List<Medium> signIn(List<Medium> mediums, List<Account> accounts, int blockId) {
+    public List<Medium> signIn(List<Medium> mediums, Account[] accounts, int blockId) {
         resetState(blockId);
-        accountsArray = accounts.toArray(new Account[0]);
+        accountsArray = accounts;
         int accountsSize = accountsArray.length;
         Random accountsToSignRand = randomFarm.get(RandomGeneratorFarm.Aspect.NUM_ACCOUNTS_SIGNIN_PER_MEDIUM);
         Random multiplicityRandom = randomFarm.get(RandomGeneratorFarm.Aspect.MULTIPLICITY_SIGNIN);

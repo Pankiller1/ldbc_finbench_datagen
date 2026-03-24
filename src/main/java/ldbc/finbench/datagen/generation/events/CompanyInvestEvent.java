@@ -38,17 +38,17 @@ public class CompanyInvestEvent implements Serializable {
         randIndex.setSeed(seed);
     }
 
-    public List<Company> companyInvestPartition(List<Company> investors, List<Company> targets) {
+    public List<Company> companyInvestPartition(Company[] investors, List<Company> targets) {
+        int investorsize = investors.length;
         Random numInvestorsRand = randomFarm.get(RandomGeneratorFarm.Aspect.NUMS_COMPANY_INVEST);
         Random chooseInvestorRand = randomFarm.get(RandomGeneratorFarm.Aspect.CHOOSE_COMPANY_INVESTOR);
-        int investorsize = investors.size();
         for (Company target : targets) {
             int numInvestors = numInvestorsRand.nextInt(
                 DatagenParams.maxInvestors - DatagenParams.minInvestors + 1
             ) + DatagenParams.minInvestors;
             for (int i = 0; i < numInvestors; i++) {
                 int index = chooseInvestorRand.nextInt(investorsize);
-                Company investor = investors.get(index);
+                Company investor = investors[index];
                 if (cannotInvest(investor, target)) {
                     continue;
                 }

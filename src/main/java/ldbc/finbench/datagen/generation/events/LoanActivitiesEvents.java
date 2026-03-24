@@ -66,9 +66,9 @@ public class LoanActivitiesEvents implements Serializable {
         amountRandom.setSeed(seed);
     }
 
-    public List<Loan> afterLoanApplied(List<Loan> loans, List<Account> targets, int blockId) {
+    public List<Loan> afterLoanApplied(List<Loan> loans, Account[] targets, int blockId) {
         resetState(blockId);
-        targetAccounts = targets.toArray(new Account[0]);
+        targetAccounts = targets;
         targetAccountsSize = targetAccounts.length;
         for (Loan loan : loans) {
             int count = 0;
