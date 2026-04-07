@@ -52,9 +52,6 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
     val companyWithAccGuaLoan = activityGenerator.companyActivitiesEvent(companyRdd)
     val companyRddAfterInvest = activityGenerator.investEvent(personRdd, companyRdd)
 
-    personRdd.unpersist()
-    companyRdd.unpersist()
-
     val accountRdd = mergeAccountsAndShuffleDegrees(personWithAccGuaLoan, companyWithAccGuaLoan)
     val mediumWithSignInRdd = activityGenerator.mediumActivitesEvent(mediumRdd, accountRdd)
     val accountWithTransferWithdraw = activityGenerator.accountActivitiesEvent(accountRdd)
@@ -62,10 +59,6 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
     val loanRdd = mergeLoans(personWithAccGuaLoan, companyWithAccGuaLoan)
     val loanWithActivitiesRdd = activityGenerator.afterLoanSubEvents(loanRdd, accountRdd)
 
-    mediumRdd.unpersist()
-    accountRdd.unpersist()
-    loanRdd.unpersist()
-    
     // Serialize
     val allFutures = Seq(
       activitySerializer.writePersonWithActivities(personWithAccGuaLoan),

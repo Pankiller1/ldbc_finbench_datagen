@@ -51,12 +51,10 @@ public class LoanActivitiesEvents implements Serializable {
         indexRandom = new Random(DatagenParams.defaultSeed);
         actionRandom = new Random(DatagenParams.defaultSeed);
         amountRandom = new Random(DatagenParams.defaultSeed);
-
-        Consumer<Loan> deposit = this::depositSubEvent;
-        Consumer<Loan> repay = this::repaySubEvent;
-        Consumer<Loan> transfer = this::transferSubEvent;
-
-        consumers = Arrays.asList(deposit, repay, transfer);
+        // Add all defined subevents to the consumers list
+        consumers = Arrays.asList(this::depositSubEvent,
+                                  this::repaySubEvent,
+                                  this::transferSubEvent);
     }
 
     public void resetState(int seed) {

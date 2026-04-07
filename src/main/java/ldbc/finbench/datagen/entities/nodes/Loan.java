@@ -33,8 +33,6 @@ public class Loan implements Serializable, Comparable<Loan> {
     private String usage;
     private final double interestRate;
     private PersonOrCompany ownerType;
-    private Person ownerPerson;
-    private Company ownerCompany;
     private long personId;
     private long companyId;
     private Account[] accounts;
@@ -149,28 +147,12 @@ public class Loan implements Serializable, Comparable<Loan> {
         return loanTransfers;
     }
 
-    public Person getOwnerPerson() {
-        return ownerPerson;
-    }
-
-    public void setOwnerPerson(Person ownerPerson) {
-        this.ownerPerson = ownerPerson;
-    }
-
     public void setOwnerPersonId(long personId) {
         this.personId = personId;
     }
 
     public long getOwnerPersonId() {
         return personId;
-    }
-
-    public Company getOwnerCompany() {
-        return ownerCompany;
-    }
-
-    public void setOwnerCompany(Company ownerCompany) {
-        this.ownerCompany = ownerCompany;
     }
 
     public void setOwnerCompanyId(long companyId) {
