@@ -66,7 +66,9 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
       Duration.Inf
     )
 
-    val accountRdd = mergeAccountsAndShuffleDegrees(personWithAccGuaLoan, companyWithAccGuaLoan)
+    val accountRdd =
+      mergeAccountsAndShuffleDegrees(personWithAccGuaLoan, companyWithAccGuaLoan)
+        .persist(StorageLevel.DISK_ONLY)
 
     val mediumWithSignInRdd = activityGenerator.mediumActivitesEvent(mediumRdd, accountRdd)
     Await.result(
@@ -93,6 +95,7 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
       Duration.Inf
     )
     loanWithActivitiesRdd.unpersist(blocking = true)
+    accountRdd.unpersist(blocking = true)
   }
 
   private def mergeAccountsAndShuffleDegrees(
