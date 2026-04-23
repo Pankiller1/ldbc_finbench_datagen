@@ -21,6 +21,7 @@ import ldbc.finbench.datagen.generation.DatagenParams
 import ldbc.finbench.datagen.generation.events._
 import ldbc.finbench.datagen.generation.events.AccountActivitiesEvent.WithdrawCard
 import ldbc.finbench.datagen.util.Logging
+import org.apache.spark.TaskContext
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 
@@ -99,8 +100,14 @@ class ActivityGenerator()(implicit spark: SparkSession)
       personRDD: RDD[Person],
       companyRDD: RDD[Company]
   ): RDD[Company] = {
-    val persons = spark.sparkContext.broadcast(personRDD.collect())
-    val companies = spark.sparkContext.broadcast(companyRDD.collect())
+    // Lightweight broadcast: only id and creationDate instead of full Person objects (with nested accounts, loans, etc.)
+    val personInfos = spark.sparkContext.broadcast(
+      personRDD.map(p => new InvestorInfo(p.getPersonId, p.getCreationDate)).collect()
+    )
+    // Lightweight broadcast: only id and creationDate instead of full Company objects
+    val companyInfos = spark.sparkContext.broadcast(
+      companyRDD.map(c => new InvestorInfo(c.getCompanyId, c.getCreationDate)).collect()
+    )
 
     val personInvestEvent = new PersonInvestEvent()
     val companyInvestEvent = new CompanyInvestEvent()
@@ -114,7 +121,7 @@ class ActivityGenerator()(implicit spark: SparkSession)
       .mapPartitionsWithIndex { (index, targets) =>
         personInvestEvent.resetState(index)
         personInvestEvent
-          .personInvestPartition(persons.value, targets.toList.asJava)
+          .personInvestPartition(personInfos.value, targets.toList.asJava)
           .iterator()
           .asScala
       }
@@ -122,7 +129,7 @@ class ActivityGenerator()(implicit spark: SparkSession)
         companyInvestEvent.resetState(index)
         companyInvestEvent
           .companyInvestPartition(
-            companies.value,
+            companyInfos.value,
             targets.toList.asJava
           )
           .iterator()
@@ -135,6 +142,7 @@ class ActivityGenerator()(implicit spark: SparkSession)
       mediumRDD: RDD[Medium],
       accountRDD: RDD[Account]
   ): RDD[Medium] = {
+    // Lightweight broadcast: only fields needed by SignIn edge creation instead of full Account objects
     val accountSampleList = spark.sparkContext.broadcast(
       accountRDD
         .sample(
@@ -142,6 +150,7 @@ class ActivityGenerator()(implicit spark: SparkSession)
           DatagenParams.accountSignedInFraction,
           sampleRandom.nextLong()
         )
+        .map(a => new SignInTargetInfo(a.getAccountId, a.getCreationDate, a.getDeletionDate, a.isExplicitlyDeleted))
         .collect()
     )
 
@@ -159,24 +168,25 @@ class ActivityGenerator()(implicit spark: SparkSession)
   }
 
   def accountActivitiesEvent(accountRDD: RDD[Account]): RDD[Account] = {
-    val accountActivitiesEvent = new AccountActivitiesEvent
-    val cards = spark.sparkContext.broadcast(
-      accountRDD
-        .filter(_.getType == "debit card")
-        .map(a => new WithdrawCard(a.getAccountId, a.getType, a.getCreationDate, a.getDeletionDate, a.isExplicitlyDeleted))
-        .collect()
-    )
+    // Derive cards RDD from the same accountRDD, keeping the same partitioning.
+    // Each partition's cards are co-located with its accounts via zipPartitions,
+    // avoiding the broadcast-collect bottleneck at large scale.
+    val cardsRDD: RDD[WithdrawCard] = accountRDD
+      .filter(_.getType == "debit card")
+      .map(a => new WithdrawCard(a.getAccountId, a.getType, a.getCreationDate, a.getDeletionDate, a.isExplicitlyDeleted))
 
-    accountRDD.mapPartitionsWithIndex((index, accounts) => {
+    val accountActivitiesEvent = new AccountActivitiesEvent
+    accountRDD.zipPartitions(cardsRDD) { (accountsIter, cardsIter) =>
+      val partitionId = TaskContext.getPartitionId()
       accountActivitiesEvent
         .accountActivities(
-          accounts.toArray,
-          cards.value,
-          index
+          accountsIter.toArray,
+          cardsIter.toArray,
+          partitionId
         )
         .iterator()
         .asScala
-    })
+    }
   }
 
   def afterLoanSubEvents(

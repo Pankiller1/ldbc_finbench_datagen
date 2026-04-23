@@ -29,9 +29,6 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
 
 import scala.collection.JavaConverters._
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
 
 class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
     extends Writer[RawSink]
@@ -49,51 +46,58 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
     val mediumRdd =
       SparkMediumGenerator(DatagenParams.numMediums, config, blockSize)
 
+    // personWithAccGuaLoan and companyWithAccGuaLoan are each used multiple times:
+    //   1) write person/company activities
+    //   2) mergeAccountsAndShuffleDegrees
+    //   3) mergeLoans
+    // Persist to avoid recomputing the expensive personActivitiesEvent/companyActivitiesEvent.
     val personWithAccGuaLoan = activityGenerator.personActivitiesEvent(personRdd)
+      .persist(StorageLevel.DISK_ONLY)
     val companyWithAccGuaLoan = activityGenerator.companyActivitiesEvent(companyRdd)
+      .persist(StorageLevel.DISK_ONLY)
     val companyRddAfterInvest = activityGenerator.investEvent(personRdd, companyRdd)
 
-    Await.result(
-      Future.sequence(activitySerializer.writePersonWithActivities(personWithAccGuaLoan)),
-      Duration.Inf
-    )
-    Await.result(
-      Future.sequence(activitySerializer.writeCompanyWithActivities(companyWithAccGuaLoan)),
-      Duration.Inf
-    )
-    Await.result(
-      Future.sequence(activitySerializer.writeInvestCompanies(companyRddAfterInvest)),
-      Duration.Inf
-    )
+    // Serial writes: person activities (person, ownAccount, guarantee, applyLoan)
+    activitySerializer.writePersonWithActivities(personWithAccGuaLoan)
+    // Serial writes: company activities (company, ownAccount, guarantee, applyLoan)
+    activitySerializer.writeCompanyWithActivities(companyWithAccGuaLoan)
+    // Serial writes: invest (personInvest, companyInvest)
+    activitySerializer.writeInvestCompanies(companyRddAfterInvest)
 
+    // accountRdd is used 3 times: mediumActivitesEvent, accountActivitiesEvent, afterLoanSubEvents
+    // Must persist.
     val accountRdd =
       mergeAccountsAndShuffleDegrees(personWithAccGuaLoan, companyWithAccGuaLoan)
         .persist(StorageLevel.DISK_ONLY)
 
-    val mediumWithSignInRdd = activityGenerator.mediumActivitesEvent(mediumRdd, accountRdd)
-    Await.result(
-      Future.sequence(activitySerializer.writeMediumWithActivities(mediumWithSignInRdd)),
-      Duration.Inf
-    )
+    // personWithAccGuaLoan / companyWithAccGuaLoan no longer needed after mergeAccounts.
+    // But they are still needed for mergeLoans below, so we keep them until after mergeLoans.
 
+    // mediumWithSignInRdd is used only once (writeMediumWithActivities), no persist needed.
+    val mediumWithSignInRdd = activityGenerator.mediumActivitesEvent(mediumRdd, accountRdd)
+    activitySerializer.writeMediumWithActivities(mediumWithSignInRdd)
+
+    // accountWithTransferWithdraw is used 3 times within writeAccountWithActivities
+    // (account, transfer, withdraw). Persist to avoid recomputing accountActivitiesEvent.
     val accountWithTransferWithdraw =
       activityGenerator.accountActivitiesEvent(accountRdd).persist(StorageLevel.DISK_ONLY)
 
-    Await.result(
-      Future.sequence(activitySerializer.writeAccountWithActivities(accountWithTransferWithdraw)),
-      Duration.Inf
-    )
+    activitySerializer.writeAccountWithActivities(accountWithTransferWithdraw)
     accountWithTransferWithdraw.unpersist(blocking = true)
 
-
+    // Now personWithAccGuaLoan / companyWithAccGuaLoan are only needed for mergeLoans.
     val loanRdd = mergeLoans(personWithAccGuaLoan, companyWithAccGuaLoan)
-    val loanWithActivitiesRdd = 
+
+    // Release person/company RDDs — no longer needed after mergeLoans.
+    personWithAccGuaLoan.unpersist(blocking = true)
+    companyWithAccGuaLoan.unpersist(blocking = true)
+
+    // loanWithActivitiesRdd is used 4 times within writeLoanActivities
+    // (loan, deposit, repay, loantransfer). Persist to avoid recomputing afterLoanSubEvents.
+    val loanWithActivitiesRdd =
       activityGenerator.afterLoanSubEvents(loanRdd, accountRdd).persist(StorageLevel.DISK_ONLY)
 
-    Await.result(
-      Future.sequence(activitySerializer.writeLoanActivities(loanWithActivitiesRdd)),
-      Duration.Inf
-    )
+    activitySerializer.writeLoanActivities(loanWithActivitiesRdd)
     loanWithActivitiesRdd.unpersist(blocking = true)
     accountRdd.unpersist(blocking = true)
   }
