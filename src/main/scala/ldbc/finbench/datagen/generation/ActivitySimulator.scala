@@ -98,8 +98,8 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
       activityGenerator.afterLoanSubEvents(loanRdd, accountRdd).persist(StorageLevel.DISK_ONLY)
 
     activitySerializer.writeLoanActivities(loanWithActivitiesRdd)
-    loanWithActivitiesRdd.unpersist(blocking = true)
-    accountRdd.unpersist(blocking = true)
+    loanWithActivitiesRdd.unpersist(false)
+    accountRdd.unpersist(false)
   }
 
   private def mergeAccountsAndShuffleDegrees(
