@@ -17,7 +17,9 @@
 package ldbc.finbench.datagen.generation.generators
 
 import ldbc.finbench.datagen.config.DatagenConfiguration
-import ldbc.finbench.datagen.entities.nodes._
+import ldbc.finbench.datagen.entities.nodes.{
+  Account, Company, InvestorInfo, Loan, LoanTargetAccount, Medium, Person, SignInTargetInfo
+}
 import ldbc.finbench.datagen.generation.{DatagenContext, DatagenParams}
 import ldbc.finbench.datagen.generation.events._
 import ldbc.finbench.datagen.generation.events.AccountActivitiesEvent.WithdrawCard
@@ -200,6 +202,9 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       loanRDD: RDD[Loan],
       accountRDD: RDD[Account]
   ): (RDD[Loan]) = {
+    // Use lightweight LoanTargetAccount instead of full Account to avoid broadcasting
+    // large objects with nested edge lists (transfers, withdraws, deposits, repays, signIns).
+    // At SF10k: 500M Accounts × ~32 bytes = ~16GB vs potentially hundreds of GB for full Account objects.
     val sampledAccounts = spark.sparkContext.broadcast(
       accountRDD
         .sample(
@@ -207,6 +212,7 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
           DatagenParams.loanInvolvedAccountsFraction,
           sampleRandom.nextLong()
         )
+        .map(a => new LoanTargetAccount(a.getAccountId, a.getCreationDate, a.getDeletionDate, a.isExplicitlyDeleted))
         .collect()
     )
 

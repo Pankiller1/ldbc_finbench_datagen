@@ -182,6 +182,12 @@ public class DateGenerator {
         return randomDate(random, fromDate, Math.min(deletionDate, simulationEnd));
     }
 
+    // Lightweight overload for loan sub-events using primitives instead of Account objects
+    public long randomLoanToAccountDate(Random random, Loan loan, long accountCreationDate, long deletionDate) {
+        long fromDate = Math.max(loan.getCreationDate(), accountCreationDate) + DatagenParams.activityDelta;
+        return randomDate(random, fromDate, Math.min(deletionDate, simulationEnd));
+    }
+
     public long randomAccountToLoanDate(Random random, Account account, Loan loan, long deletionDate) {
         long fromDate = Math.max(account.getCreationDate(), loan.getCreationDate()) + DatagenParams.activityDelta;
         return randomDate(random, fromDate, Math.min(deletionDate, simulationEnd));
