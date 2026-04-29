@@ -35,10 +35,11 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
     with Serializable
     with Logging {
   private val blockSize: Int = DatagenParams.blockSize
-  private val activityGenerator = new ActivityGenerator()
   private val activitySerializer = new ActivitySerializer(sink)
 
   def simulate(config: DatagenConfiguration): Unit = {
+    val activityGenerator = new ActivityGenerator(config)
+
     val personRdd =
       SparkPersonGenerator(DatagenParams.numPersons, config, blockSize)
     val companyRdd =

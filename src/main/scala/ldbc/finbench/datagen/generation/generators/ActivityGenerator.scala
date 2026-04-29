@@ -16,8 +16,9 @@
 
 package ldbc.finbench.datagen.generation.generators
 
+import ldbc.finbench.datagen.config.DatagenConfiguration
 import ldbc.finbench.datagen.entities.nodes._
-import ldbc.finbench.datagen.generation.DatagenParams
+import ldbc.finbench.datagen.generation.{DatagenContext, DatagenParams}
 import ldbc.finbench.datagen.generation.events._
 import ldbc.finbench.datagen.generation.events.AccountActivitiesEvent.WithdrawCard
 import ldbc.finbench.datagen.util.Logging
@@ -28,7 +29,7 @@ import org.apache.spark.sql.SparkSession
 import scala.collection.JavaConverters._
 import scala.collection.SortedMap
 
-class ActivityGenerator()(implicit spark: SparkSession)
+class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSession)
     extends Serializable
     with Logging {
 
@@ -51,6 +52,7 @@ class ActivityGenerator()(implicit spark: SparkSession)
         (a: SortedMap[Long, Person], b: SortedMap[Long, Person]) => a ++ b
       )
       .mapPartitions(groups => {
+        DatagenContext.initialize(config)
         groups.flatMap { case (block, persons) =>
           personActivitiesEvent
             .personActivities(
@@ -80,6 +82,7 @@ class ActivityGenerator()(implicit spark: SparkSession)
         (a: SortedMap[Long, Company], b: SortedMap[Long, Company]) => a ++ b
       )
       .mapPartitions(groups => {
+        DatagenContext.initialize(config)
         groups.flatMap { case (block, companies) =>
           companyActivitiesEvent
             .companyActivities(
@@ -119,6 +122,7 @@ class ActivityGenerator()(implicit spark: SparkSession)
         sampleRandom.nextLong()
       )
       .mapPartitionsWithIndex { (index, targets) =>
+        DatagenContext.initialize(config)
         personInvestEvent.resetState(index)
         personInvestEvent
           .personInvestPartition(personInfos.value, targets.toList.asJava)
@@ -126,6 +130,7 @@ class ActivityGenerator()(implicit spark: SparkSession)
           .asScala
       }
       .mapPartitionsWithIndex { (index, targets) =>
+        DatagenContext.initialize(config)
         companyInvestEvent.resetState(index)
         companyInvestEvent
           .companyInvestPartition(
@@ -156,6 +161,7 @@ class ActivityGenerator()(implicit spark: SparkSession)
 
     val signInEvent = new SignInEvent
     mediumRDD.mapPartitionsWithIndex((index, mediums) => {
+      DatagenContext.initialize(config)
       signInEvent
         .signIn(
           mediums.toList.asJava,
@@ -177,6 +183,7 @@ class ActivityGenerator()(implicit spark: SparkSession)
 
     val accountActivitiesEvent = new AccountActivitiesEvent
     accountRDD.zipPartitions(cardsRDD) { (accountsIter, cardsIter) =>
+      DatagenContext.initialize(config)
       val partitionId = TaskContext.getPartitionId()
       accountActivitiesEvent
         .accountActivities(
@@ -204,6 +211,7 @@ class ActivityGenerator()(implicit spark: SparkSession)
     )
 
     loanRDD.mapPartitionsWithIndex((index, loans) => {
+      DatagenContext.initialize(config)
       val loanSubEvents = new LoanActivitiesEvents
       loanSubEvents
         .afterLoanApplied(
