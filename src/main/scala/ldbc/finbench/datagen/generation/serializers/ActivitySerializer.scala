@@ -35,6 +35,9 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
   private val options: Map[String, String] =
     sink.formatOptions ++ Map("header" -> "true", "delimiter" -> "|")
   private val pathPrefix: String = (sink.outputDir / "raw").toString
+  // Control concurrent write partitions: use sink.partitions if specified, otherwise default to 200.
+  // This reduces HDFS DataNode pressure caused by too many concurrent write tasks.
+  private val writePartitions: Int = sink.partitions.getOrElse(200)
 
   private def formattedDouble(d: Double): String = f"$d%.2f"
 
@@ -57,6 +60,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawPersons)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -78,6 +82,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawPersonOwnAccount)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -98,6 +103,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawPersonGuarantee)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -119,6 +125,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawPersonLoan)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -146,6 +153,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawCompanies)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -167,6 +175,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawCompanyOwnAccount)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -187,6 +196,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawCompanyGuarantee)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -208,6 +218,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawCompanyLoan)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -232,6 +243,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawMedium)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -255,6 +267,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawSignIn)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -288,6 +301,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawAccount)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -314,6 +328,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawTransfer)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -339,6 +354,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawWithdraw)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -364,6 +380,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawPersonInvestCompany)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -384,6 +401,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawCompanyInvestCompany)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -408,6 +426,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawLoan)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -430,6 +449,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawDeposit)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -452,6 +472,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawRepay)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
@@ -478,6 +499,7 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
       }
       spark
         .createDataFrame(rawLoanTransfer)
+        .coalesce(writePartitions)
         .write
         .format(sink.format.toString)
         .options(options)
