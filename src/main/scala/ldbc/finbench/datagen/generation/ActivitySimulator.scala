@@ -74,9 +74,12 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
     // personWithAccGuaLoan / companyWithAccGuaLoan no longer needed after mergeAccounts.
     // But they are still needed for mergeLoans below, so we keep them until after mergeLoans.
 
-    // mediumWithSignInRdd is used only once (writeMediumWithActivities), no persist needed.
+    // mediumWithSignInRdd is written twice inside writeMediumWithActivities (medium, signIn).
+    // Persist to avoid recomputing the shard-routing stage between the two writes.
     val mediumWithSignInRdd = activityGenerator.mediumActivitesEvent(mediumRdd, accountRdd)
+      .persist(StorageLevel.DISK_ONLY)
     activitySerializer.writeMediumWithActivities(mediumWithSignInRdd)
+    mediumWithSignInRdd.unpersist(blocking = true)
 
     // accountWithTransferWithdraw is used 3 times within writeAccountWithActivities
     // (account, transfer, withdraw). Persist to avoid recomputing accountActivitiesEvent.

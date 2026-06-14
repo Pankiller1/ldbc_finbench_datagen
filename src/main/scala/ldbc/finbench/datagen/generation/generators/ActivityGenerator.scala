@@ -17,19 +17,21 @@
 package ldbc.finbench.datagen.generation.generators
 
 import ldbc.finbench.datagen.config.DatagenConfiguration
+import ldbc.finbench.datagen.entities.edges.{Deposit, Repay, SignIn, Transfer}
 import ldbc.finbench.datagen.entities.nodes.{
   Account, Company, InvestorInfo, Loan, LoanTargetAccount, Medium, Person, SignInTargetInfo
 }
 import ldbc.finbench.datagen.generation.{DatagenContext, DatagenParams}
 import ldbc.finbench.datagen.generation.events._
 import ldbc.finbench.datagen.generation.events.AccountActivitiesEvent.WithdrawCard
-import ldbc.finbench.datagen.util.Logging
-import org.apache.spark.TaskContext
+import ldbc.finbench.datagen.util.{Logging, RandomGeneratorFarm}
+import org.apache.spark.{HashPartitioner, TaskContext}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 
 import scala.collection.JavaConverters._
 import scala.collection.SortedMap
+import scala.collection.mutable.ArrayBuffer
 
 class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSession)
     extends Serializable
@@ -39,6 +41,31 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
   val sampleRandom = new scala.util.Random(DatagenParams.defaultSeed)
   val accountGenerator = new AccountGenerator()
   val loanGenerator = new LoanGenerator()
+  private val shardCount: Int = Math.max(1, spark.sparkContext.defaultParallelism)
+  private val shardPartitioner = new HashPartitioner(shardCount)
+
+  private case class SignInRequest(
+      mediumId: Long,
+      mediumCreationDate: Long,
+      multiplicity: Int,
+      candidateSeed: Long,
+      eventSeed: Long
+  ) extends Serializable
+
+  private case class LoanTransferRequest(
+      loanId: Long,
+      loanCreationDate: Long,
+      fromAccount: Account,
+      forward: Boolean,
+      amount: Double,
+      candidateSeed: Long,
+      eventSeed: Long
+  ) extends Serializable
+
+  private case class LoanActionBundle(
+      loan: Loan,
+      transferRequests: Seq[(Int, LoanTransferRequest)]
+  ) extends Serializable
 
   // including account, loan, guarantee
   def personActivitiesEvent(personRDD: RDD[Person]): RDD[Person] = {
@@ -105,11 +132,9 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       personRDD: RDD[Person],
       companyRDD: RDD[Company]
   ): RDD[Company] = {
-    // Lightweight broadcast: only id and creationDate instead of full Person objects (with nested accounts, loans, etc.)
     val personInfos = spark.sparkContext.broadcast(
       personRDD.map(p => new InvestorInfo(p.getPersonId, p.getCreationDate)).collect()
     )
-    // Lightweight broadcast: only id and creationDate instead of full Company objects
     val companyInfos = spark.sparkContext.broadcast(
       companyRDD.map(c => new InvestorInfo(c.getCompanyId, c.getCreationDate)).collect()
     )
@@ -149,36 +174,94 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       mediumRDD: RDD[Medium],
       accountRDD: RDD[Account]
   ): RDD[Medium] = {
-    // Lightweight broadcast: only fields needed by SignIn edge creation instead of full Account objects
-    val accountSampleList = spark.sparkContext.broadcast(
-      accountRDD
-        .sample(
-          withReplacement = false,
-          DatagenParams.accountSignedInFraction,
-          sampleRandom.nextLong()
-        )
-        .map(a => new SignInTargetInfo(a.getAccountId, a.getCreationDate, a.getDeletionDate, a.isExplicitlyDeleted))
-        .collect()
-    )
+    val accountTargets = accountRDD
+      .sample(
+        withReplacement = false,
+        DatagenParams.accountSignedInFraction,
+        sampleRandom.nextLong()
+      )
+      .map(a => shardFor(a.getAccountId) -> new SignInTargetInfo(
+        a.getAccountId,
+        a.getCreationDate,
+        a.getDeletionDate,
+        a.isExplicitlyDeleted
+      ))
 
-    val signInEvent = new SignInEvent
-    mediumRDD.mapPartitionsWithIndex((index, mediums) => {
+    val signInRequests = mediumRDD.mapPartitionsWithIndex { (partitionId, mediums) =>
       DatagenContext.initialize(config)
-      signInEvent
-        .signIn(
-          mediums.toList.asJava,
-          accountSampleList.value,
-          index
-        )
-        .iterator()
-        .asScala
-    })
+      val farm = new RandomGeneratorFarm()
+      farm.resetRandomGenerators(partitionId)
+      val accountsToSignRand = farm.get(RandomGeneratorFarm.Aspect.NUM_ACCOUNTS_SIGNIN_PER_MEDIUM)
+      val multiplicityRand = farm.get(RandomGeneratorFarm.Aspect.MULTIPLICITY_SIGNIN)
+      val routingRand = new java.util.Random(partitionId.toLong)
+      val numAccountsToSign = Math.max(1, accountsToSignRand.nextInt(DatagenParams.maxAccountToSignIn))
+
+      mediums.flatMap { medium =>
+        (0 until numAccountsToSign).iterator.map { _ =>
+          val multiplicity = Math.max(1, multiplicityRand.nextInt(DatagenParams.maxSignInPerPair))
+          val shardId = routingRand.nextInt(shardCount)
+          shardId -> SignInRequest(
+            mediumId = medium.getMediumId,
+            mediumCreationDate = medium.getCreationDate,
+            multiplicity = multiplicity,
+            candidateSeed = routingRand.nextLong(),
+            eventSeed = routingRand.nextLong()
+          )
+        }
+      }
+    }
+
+    val signInsByMediumId = signInRequests
+      .cogroup(accountTargets, shardPartitioner)
+      .flatMap { case (_, (requests, candidates)) =>
+        DatagenContext.initialize(config)
+        val candidateArray = candidates.iterator.toArray
+        if (candidateArray.isEmpty) {
+          Iterator.empty
+        } else {
+          requests.iterator.flatMap { request =>
+            val target = candidateArray(pickCandidateIndex(request.candidateSeed, candidateArray.length))
+            if (cannotSignIn(request.mediumCreationDate, target)) {
+              Iterator.empty
+            } else {
+              val farm = new RandomGeneratorFarm()
+              farm.resetRandomGenerators(request.eventSeed)
+              val medium = new Medium()
+              medium.setMediumId(request.mediumId)
+              medium.setCreationDate(request.mediumCreationDate)
+              var multiplicityId = 0
+              while (multiplicityId < request.multiplicity) {
+                SignIn.createSignIn(farm, multiplicityId, medium, target)
+                multiplicityId += 1
+              }
+              medium.getSignIns.asScala.iterator.map(signIn => request.mediumId -> signIn)
+            }
+          }
+        }
+      }
+      .combineByKeyWithClassTag[ArrayBuffer[SignIn]](
+        (signIn: SignIn) => ArrayBuffer(signIn),
+        (buffer: ArrayBuffer[SignIn], signIn: SignIn) => {
+          buffer += signIn
+          buffer
+        },
+        (left: ArrayBuffer[SignIn], right: ArrayBuffer[SignIn]) => {
+          left ++= right
+          left
+        }
+      )
+
+    mediumRDD
+      .keyBy(_.getMediumId)
+      .leftOuterJoin(signInsByMediumId)
+      .values
+      .map { case (medium, signInsOpt) =>
+        signInsOpt.foreach(_.foreach(medium.getSignIns.add))
+        medium
+      }
   }
 
   def accountActivitiesEvent(accountRDD: RDD[Account]): RDD[Account] = {
-    // Derive cards RDD from the same accountRDD, keeping the same partitioning.
-    // Each partition's cards are co-located with its accounts via zipPartitions,
-    // avoiding the broadcast-collect bottleneck at large scale.
     val cardsRDD: RDD[WithdrawCard] = accountRDD
       .filter(_.getType == "debit card")
       .map(a => new WithdrawCard(a.getAccountId, a.getType, a.getCreationDate, a.getDeletionDate, a.isExplicitlyDeleted))
@@ -201,32 +284,224 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
   def afterLoanSubEvents(
       loanRDD: RDD[Loan],
       accountRDD: RDD[Account]
-  ): (RDD[Loan]) = {
-    // Use lightweight LoanTargetAccount instead of full Account to avoid broadcasting
-    // large objects with nested edge lists (transfers, withdraws, deposits, repays, signIns).
-    // At SF10k: 500M Accounts × ~32 bytes = ~16GB vs potentially hundreds of GB for full Account objects.
-    val sampledAccounts = spark.sparkContext.broadcast(
-      accountRDD
-        .sample(
-          withReplacement = false,
-          DatagenParams.loanInvolvedAccountsFraction,
-          sampleRandom.nextLong()
-        )
-        .map(a => new LoanTargetAccount(a.getAccountId, a.getCreationDate, a.getDeletionDate, a.isExplicitlyDeleted))
-        .collect()
-    )
-
-    loanRDD.mapPartitionsWithIndex((index, loans) => {
+  ): RDD[Loan] = {
+    val actionBundles = loanRDD.mapPartitionsWithIndex { (partitionId, loans) =>
       DatagenContext.initialize(config)
-      val loanSubEvents = new LoanActivitiesEvents
-      loanSubEvents
-        .afterLoanApplied(
-          loans.toList.asJava,
-          sampledAccounts.value,
-          index
-        )
-        .iterator()
-        .asScala
-    })
+      val farm = new RandomGeneratorFarm()
+      farm.resetRandomGenerators(partitionId)
+      val indexRand = new java.util.Random(partitionId.toLong)
+      val actionRand = new java.util.Random(17L * partitionId + 7L)
+      val amountRand = new java.util.Random(31L * partitionId + 11L)
+
+      loans.map { loan =>
+        val requests = ArrayBuffer.empty[(Int, LoanTransferRequest)]
+        var count = 0
+        while (count < DatagenParams.numLoanActions) {
+          actionRand.nextInt(3) match {
+            case 0 =>
+              withLoanAccount(loan, indexRand) { account =>
+                if (!cannotDeposit(loan, account)) {
+                  Deposit.createDeposit(farm, loan, account, amountRand.nextDouble() * loan.getBalance)
+                }
+              }
+            case 1 =>
+              withLoanAccount(loan, indexRand) { account =>
+                if (!cannotRepay(account, loan)) {
+                  Repay.createRepay(
+                    farm,
+                    account,
+                    loan,
+                    amountRand.nextDouble() * (loan.getLoanAmount - loan.getBalance)
+                  )
+                }
+              }
+            case _ =>
+              withLoanAccount(loan, indexRand) { account =>
+                val shardId = indexRand.nextInt(shardCount)
+                requests += shardId -> LoanTransferRequest(
+                  loanId = loan.getLoanId,
+                  loanCreationDate = loan.getCreationDate,
+                  fromAccount = account,
+                  forward = actionRand.nextDouble() < 0.5,
+                  amount = amountRand.nextDouble() * DatagenParams.transferMaxAmount,
+                  candidateSeed = indexRand.nextLong(),
+                  eventSeed = indexRand.nextLong()
+                )
+              }
+          }
+          count += 1
+        }
+        LoanActionBundle(loan, requests.toVector)
+      }
+    }
+
+    val localLoans = actionBundles.map(_.loan)
+    val transferRequests = actionBundles.flatMap(_.transferRequests)
+
+    val transferTargets = accountRDD
+      .sample(
+        withReplacement = false,
+        DatagenParams.loanInvolvedAccountsFraction,
+        sampleRandom.nextLong()
+      )
+      .map(a => shardFor(a.getAccountId) -> new LoanTargetAccount(
+        a.getAccountId,
+        a.getCreationDate,
+        a.getDeletionDate,
+        a.isExplicitlyDeleted
+      ))
+
+    val loanTransfersByLoanId = transferRequests
+      .cogroup(transferTargets, shardPartitioner)
+      .flatMap { case (_, (requests, candidates)) =>
+        DatagenContext.initialize(config)
+        val candidateArray = candidates.iterator.toArray
+        if (candidateArray.isEmpty) {
+          Iterator.empty
+        } else {
+          val multiplicityMap = scala.collection.mutable.HashMap.empty[(Long, Long), Long]
+          requests.iterator.flatMap { request =>
+            val target = candidateArray(pickCandidateIndex(request.candidateSeed, candidateArray.length))
+            if (request.forward) {
+              if (cannotTransfer(request.fromAccount, target)) {
+                Iterator.empty
+              } else {
+                Iterator.single(
+                  request.loanId -> createLoanTransfer(
+                    request,
+                    target,
+                    nextMultiplicity(
+                      multiplicityMap,
+                      request.fromAccount.getAccountId,
+                      target.getAccountId
+                    )
+                  )
+                )
+              }
+            } else {
+              if (cannotTransfer(target, request.fromAccount)) {
+                Iterator.empty
+              } else {
+                Iterator.single(
+                  request.loanId -> createLoanTransfer(
+                    request,
+                    target,
+                    nextMultiplicity(
+                      multiplicityMap,
+                      target.getAccountId,
+                      request.fromAccount.getAccountId
+                    )
+                  )
+                )
+              }
+            }
+          }
+        }
+      }
+      .combineByKeyWithClassTag[ArrayBuffer[Transfer]](
+        (transfer: Transfer) => ArrayBuffer(transfer),
+        (buffer: ArrayBuffer[Transfer], transfer: Transfer) => {
+          buffer += transfer
+          buffer
+        },
+        (left: ArrayBuffer[Transfer], right: ArrayBuffer[Transfer]) => {
+          left ++= right
+          left
+        }
+      )
+
+    localLoans
+      .keyBy(_.getLoanId)
+      .leftOuterJoin(loanTransfersByLoanId)
+      .values
+      .map { case (loan, transfersOpt) =>
+        transfersOpt.foreach(_.foreach(loan.addLoanTransfer))
+        loan
+      }
+  }
+
+  private def shardFor(entityId: Long): Int =
+    Math.floorMod(java.lang.Long.hashCode(entityId), shardCount)
+
+  private def pickCandidateIndex(seed: Long, candidateCount: Int): Int = {
+    val rand = new java.util.Random(seed)
+    rand.nextInt(candidateCount)
+  }
+
+  private def cannotSignIn(mediumCreationDate: Long, account: SignInTargetInfo): Boolean =
+    mediumCreationDate + DatagenParams.activityDelta > account.getDeletionDate
+
+  private def cannotDeposit(loan: Loan, account: Account): Boolean =
+    loan.getBalance == 0 || loan.getCreationDate + DatagenParams.activityDelta > account.getDeletionDate
+
+  private def cannotRepay(account: Account, loan: Loan): Boolean =
+    loan.getLoanAmount == loan.getBalance ||
+      account.getDeletionDate < loan.getCreationDate + DatagenParams.activityDelta
+
+  private def cannotTransfer(from: Account, to: LoanTargetAccount): Boolean =
+    from.getDeletionDate < to.getCreationDate + DatagenParams.activityDelta ||
+      from.getCreationDate + DatagenParams.activityDelta > to.getDeletionDate
+
+  private def cannotTransfer(from: LoanTargetAccount, to: Account): Boolean =
+    from.getDeletionDate < to.getCreationDate + DatagenParams.activityDelta ||
+      from.getCreationDate + DatagenParams.activityDelta > to.getDeletionDate
+
+  private def withLoanAccount(
+      loan: Loan,
+      random: java.util.Random
+  )(f: Account => Unit): Unit = {
+    val accounts = loan.getAccounts
+    if (accounts != null && accounts.nonEmpty) {
+      f(accounts(random.nextInt(accounts.length)))
+    }
+  }
+
+  private def nextMultiplicity(
+      multiplicityMap: scala.collection.mutable.HashMap[(Long, Long), Long],
+      fromAccountId: Long,
+      toAccountId: Long
+  ): Long = {
+    val key = fromAccountId -> toAccountId
+    val value = multiplicityMap.getOrElse(key, 0L)
+    multiplicityMap.update(key, value + 1L)
+    value
+  }
+
+  private def createLoanTransfer(
+      request: LoanTransferRequest,
+      target: LoanTargetAccount,
+      multiplicityId: Long
+  ): Transfer = {
+    val farm = new RandomGeneratorFarm()
+    farm.resetRandomGenerators(request.eventSeed)
+    val fragment = new Loan(
+      request.loanId,
+      0.0,
+      0.0,
+      request.loanCreationDate,
+      0L,
+      "",
+      0.0
+    )
+    if (request.forward) {
+      Transfer.createLoanTransfer(
+        farm,
+        request.fromAccount,
+        target,
+        fragment,
+        multiplicityId,
+        request.amount
+      )
+    } else {
+      Transfer.createLoanTransfer(
+        farm,
+        target,
+        request.fromAccount,
+        fragment,
+        multiplicityId,
+        request.amount
+      )
+    }
+    fragment.getLoanTransfers.get(0)
   }
 }
