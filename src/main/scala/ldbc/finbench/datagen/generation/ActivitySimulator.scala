@@ -65,7 +65,7 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
     // Serial writes: invest (personInvest, companyInvest)
     activitySerializer.writeInvestCompanies(companyRddAfterInvest)
 
-    // accountRdd is used 3 times: mediumActivitesEvent, accountActivitiesEvent, afterLoanSubEvents
+    // accountRdd is used by medium, account raw, transfer, withdraw, and loan sub-events.
     // Must persist.
     val accountRdd =
       mergeAccountsAndShuffleDegrees(personWithAccGuaLoan, companyWithAccGuaLoan)
@@ -81,13 +81,9 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
     activitySerializer.writeMediumWithActivities(mediumWithSignInRdd)
     mediumWithSignInRdd.unpersist(blocking = true)
 
-    // accountWithTransferWithdraw is used 3 times within writeAccountWithActivities
-    // (account, transfer, withdraw). Persist to avoid recomputing accountActivitiesEvent.
-    val accountWithTransferWithdraw =
-      activityGenerator.accountActivitiesEvent(accountRdd).persist(StorageLevel.DISK_ONLY)
-
-    activitySerializer.writeAccountWithActivities(accountWithTransferWithdraw)
-    accountWithTransferWithdraw.unpersist(blocking = true)
+    activitySerializer.writeAccounts(accountRdd)
+    activitySerializer.writeAccountTransfers(activityGenerator.accountActivitiesEvent(accountRdd))
+    activitySerializer.writeWithdraws(activityGenerator.withdrawActivitiesEvent(accountRdd))
 
     // Now personWithAccGuaLoan / companyWithAccGuaLoan are only needed for mergeLoans.
     val loanRdd = mergeLoans(personWithAccGuaLoan, companyWithAccGuaLoan)

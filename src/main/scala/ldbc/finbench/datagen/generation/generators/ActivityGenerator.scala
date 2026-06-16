@@ -17,7 +17,7 @@
 package ldbc.finbench.datagen.generation.generators
 
 import ldbc.finbench.datagen.config.DatagenConfiguration
-import ldbc.finbench.datagen.entities.edges.{Deposit, Repay, SignIn, Transfer}
+import ldbc.finbench.datagen.entities.edges.{Deposit, Repay, SignIn, Transfer, Withdraw}
 import ldbc.finbench.datagen.entities.nodes.{
   Account, Company, InvestorInfo, Loan, LoanTargetAccount, Medium, Person, SignInTargetInfo
 }
@@ -65,6 +65,16 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
   private case class LoanActionBundle(
       loan: Loan,
       transferRequests: Seq[(Int, LoanTransferRequest)]
+  ) extends Serializable
+
+  private case class WithdrawRequest(
+      fromAccountId: Long,
+      fromAccountType: String,
+      fromCreationDate: Long,
+      fromDeletionDate: Long,
+      fromExplicitlyDeleted: Boolean,
+      candidateSeed: Long,
+      eventSeed: Long
   ) extends Serializable
 
   // including account, loan, guarantee
@@ -262,23 +272,89 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
   }
 
   def accountActivitiesEvent(accountRDD: RDD[Account]): RDD[Account] = {
-    val cardsRDD: RDD[WithdrawCard] = accountRDD
-      .filter(_.getType == "debit card")
-      .map(a => new WithdrawCard(a.getAccountId, a.getType, a.getCreationDate, a.getDeletionDate, a.isExplicitlyDeleted))
-
     val accountActivitiesEvent = new AccountActivitiesEvent
-    accountRDD.zipPartitions(cardsRDD) { (accountsIter, cardsIter) =>
+    accountRDD.mapPartitions { accountsIter =>
       DatagenContext.initialize(config)
       val partitionId = TaskContext.getPartitionId()
       accountActivitiesEvent
         .accountActivities(
           accountsIter.toArray,
-          cardsIter.toArray,
+          Array.empty[WithdrawCard],
           partitionId
         )
         .iterator()
         .asScala
+        .map { account =>
+          account.getTransferIns.clear()
+          account
+        }
     }
+  }
+
+  def withdrawActivitiesEvent(accountRDD: RDD[Account]): RDD[Withdraw] = {
+    val cardTargets: RDD[(Int, WithdrawCard)] = accountRDD
+      .filter(_.getType == "debit card")
+      .map(a => shardFor(a.getAccountId) -> new WithdrawCard(
+        a.getAccountId,
+        a.getType,
+        a.getCreationDate,
+        a.getDeletionDate,
+        a.isExplicitlyDeleted
+      ))
+
+    val withdrawRequests = accountRDD.mapPartitionsWithIndex { (partitionId, accounts) =>
+      DatagenContext.initialize(config)
+      val farm = new RandomGeneratorFarm()
+      farm.resetRandomGenerators(partitionId)
+      val pickAccountForWithdrawal = farm.get(RandomGeneratorFarm.Aspect.ACCOUNT_WHETHER_WITHDRAW)
+      val routingRand = new java.util.Random(53L * partitionId + 19L)
+
+      accounts.flatMap { account =>
+        val shouldWithdraw = pickAccountForWithdrawal.nextDouble() < DatagenParams.accountWithdrawFraction
+        if (!shouldWithdraw || account.getType == "debit card") {
+          Iterator.empty
+        } else {
+          (0 until DatagenParams.maxWithdrawals).iterator.map { _ =>
+            val shardId = routingRand.nextInt(shardCount)
+            shardId -> WithdrawRequest(
+              fromAccountId = account.getAccountId,
+              fromAccountType = account.getType,
+              fromCreationDate = account.getCreationDate,
+              fromDeletionDate = account.getDeletionDate,
+              fromExplicitlyDeleted = account.isExplicitlyDeleted,
+              candidateSeed = routingRand.nextLong(),
+              eventSeed = routingRand.nextLong()
+            )
+          }
+        }
+      }
+    }
+
+    withdrawRequests
+      .cogroup(cardTargets, shardPartitioner)
+      .flatMap { case (_, (requests, candidates)) =>
+        DatagenContext.initialize(config)
+        val candidateArray = candidates.iterator.toArray
+        if (candidateArray.isEmpty) {
+          Iterator.empty
+        } else {
+          val multiplicityMap = scala.collection.mutable.HashMap.empty[(Long, Long), Long]
+          requests.iterator.flatMap { request =>
+            val target = candidateArray(pickCandidateIndex(request.candidateSeed, candidateArray.length))
+            if (cannotWithdraw(request, target)) {
+              Iterator.empty
+            } else {
+              Iterator.single(
+                createWithdraw(
+                  request,
+                  target,
+                  nextMultiplicity(multiplicityMap, request.fromAccountId, target.getAccountId)
+                )
+              )
+            }
+          }
+        }
+      }
   }
 
   def afterLoanSubEvents(
@@ -446,6 +522,12 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
     from.getDeletionDate < to.getCreationDate + DatagenParams.activityDelta ||
       from.getCreationDate + DatagenParams.activityDelta > to.getDeletionDate
 
+  private def cannotWithdraw(from: WithdrawRequest, to: WithdrawCard): Boolean =
+    from.fromAccountType == "debit card" ||
+      from.fromDeletionDate < to.getCreationDate + DatagenParams.activityDelta ||
+      from.fromCreationDate + DatagenParams.activityDelta > to.getDeletionDate ||
+      from.fromAccountId == to.getAccountId
+
   private def withLoanAccount(
       loan: Loan,
       random: java.util.Random
@@ -503,5 +585,31 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       )
     }
     fragment.getLoanTransfers.get(0)
+  }
+
+  private def createWithdraw(
+      request: WithdrawRequest,
+      target: WithdrawCard,
+      multiplicityId: Long
+  ): Withdraw = {
+    val farm = new RandomGeneratorFarm()
+    farm.resetRandomGenerators(request.eventSeed)
+    val from = new Account()
+    from.setAccountId(request.fromAccountId)
+    from.setType(request.fromAccountType)
+    from.setCreationDate(request.fromCreationDate)
+    from.setDeletionDate(request.fromDeletionDate)
+    from.setExplicitlyDeleted(request.fromExplicitlyDeleted)
+    Withdraw.createWithdraw(
+      farm,
+      from,
+      target.getAccountId,
+      target.getType,
+      target.getCreationDate,
+      target.getDeletionDate,
+      target.isExplicitlyDeleted,
+      multiplicityId
+    )
+    from.getWithdraws.get(0)
   }
 }

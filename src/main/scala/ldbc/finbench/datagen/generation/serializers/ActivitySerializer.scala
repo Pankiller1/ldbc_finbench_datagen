@@ -265,7 +265,14 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
   def writeAccountWithActivities(accountsRDD: RDD[Account])(implicit
       spark: SparkSession
   ): Unit = {
-    // Write Account
+    writeAccounts(accountsRDD)
+    writeAccountTransfers(accountsRDD)
+    writeWithdraws(accountsRDD.flatMap(_.getWithdraws.asScala))
+  }
+
+  def writeAccounts(accountsRDD: RDD[Account])(implicit
+      spark: SparkSession
+  ): Unit = {
     SparkUI.job("Write Account", "Write Account") {
       val rawAccount = accountsRDD.map { a: Account =>
         AccountRaw(
@@ -293,7 +300,11 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
         .options(options)
         .save((pathPrefix / "account").toString)
     }
-    // Write Account transfer
+  }
+
+  def writeAccountTransfers(accountsRDD: RDD[Account])(implicit
+      spark: SparkSession
+  ): Unit = {
     SparkUI.job("Write Account transfer", "Write Account transfer") {
       val rawTransfer = accountsRDD.flatMap { acc =>
         acc.getTransferOuts.asScala.map { t =>
@@ -319,23 +330,25 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
         .options(options)
         .save((pathPrefix / "transfer").toString)
     }
-    // Write withdraw
+  }
+
+  def writeWithdraws(withdrawsRDD: RDD[Withdraw])(implicit
+      spark: SparkSession
+  ): Unit = {
     SparkUI.job("Write withdraw", "Write Withdraw") {
-      val rawWithdraw = accountsRDD.flatMap { acc =>
-        acc.getWithdraws.asScala.map { w =>
-          WithdrawRaw(
-            w.getFromAccountId,
-            w.getToAccountId,
-            w.getFromAccountType,
-            w.getToAccountType,
-            w.getMultiplicityId,
-            w.getCreationDate,
-            w.getDeletionDate,
-            formattedDouble(w.getAmount),
-            w.isExplicitlyDeleted,
-            w.getComment
-          )
-        }
+      val rawWithdraw = withdrawsRDD.map { w =>
+        WithdrawRaw(
+          w.getFromAccountId,
+          w.getToAccountId,
+          w.getFromAccountType,
+          w.getToAccountType,
+          w.getMultiplicityId,
+          w.getCreationDate,
+          w.getDeletionDate,
+          formattedDouble(w.getAmount),
+          w.isExplicitlyDeleted,
+          w.getComment
+        )
       }
       spark
         .createDataFrame(rawWithdraw)
