@@ -33,6 +33,18 @@ import scala.collection.JavaConverters._
 import scala.collection.SortedMap
 import scala.collection.mutable.ArrayBuffer
 
+case class LoanActivityBundle(
+    loanId: Long,
+    creationDate: Long,
+    loanAmount: Double,
+    balance: Double,
+    usage: String,
+    interestRate: Double,
+    deposits: Seq[Deposit],
+    repays: Seq[Repay],
+    loanTransfers: Seq[Transfer]
+) extends Serializable
+
 class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSession)
     extends Serializable
     with Logging {
@@ -50,21 +62,6 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       multiplicity: Int,
       candidateSeed: Long,
       eventSeed: Long
-  ) extends Serializable
-
-  private case class LoanTransferRequest(
-      loanId: Long,
-      loanCreationDate: Long,
-      fromAccount: Account,
-      forward: Boolean,
-      amount: Double,
-      candidateSeed: Long,
-      eventSeed: Long
-  ) extends Serializable
-
-  private case class LoanActionBundle(
-      loan: Loan,
-      transferRequests: Seq[(Int, LoanTransferRequest)]
   ) extends Serializable
 
   // including account, loan, guarantee
@@ -334,16 +331,57 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       loanRDD: RDD[Loan],
       accountRDD: RDD[Account]
   ): RDD[Loan] = {
-    val actionBundles = loanRDD.mapPartitionsWithIndex { (partitionId, loans) =>
+    loanActivitiesEvent(loanRDD, accountRDD).map { bundle =>
+      val loan = new Loan(
+        bundle.loanId,
+        bundle.loanAmount,
+        bundle.balance,
+        bundle.creationDate,
+        0L,
+        bundle.usage,
+        bundle.interestRate
+      )
+      bundle.deposits.foreach(loan.getDeposits.add)
+      bundle.repays.foreach(loan.getRepays.add)
+      bundle.loanTransfers.foreach(loan.addLoanTransfer)
+      loan
+    }
+  }
+
+  def loanActivitiesEvent(
+      loanRDD: RDD[Loan],
+      accountRDD: RDD[Account]
+  ): RDD[LoanActivityBundle] = {
+    val transferTargets: RDD[LoanTargetAccount] = accountRDD
+      .sample(
+        withReplacement = false,
+        DatagenParams.loanInvolvedAccountsFraction,
+        sampleRandom.nextLong()
+      )
+      .map(a => new LoanTargetAccount(
+        a.getAccountId,
+        a.getCreationDate,
+        a.getDeletionDate,
+        a.isExplicitlyDeleted
+      ))
+
+    require(
+      loanRDD.partitions.length == transferTargets.partitions.length,
+      s"loanRDD partitions (${loanRDD.partitions.length}) must match account target partitions (${transferTargets.partitions.length})"
+    )
+
+    loanRDD.zipPartitions(transferTargets) { (loans, targets) =>
       DatagenContext.initialize(config)
+      val partitionId = TaskContext.getPartitionId()
       val farm = new RandomGeneratorFarm()
       farm.resetRandomGenerators(partitionId)
       val indexRand = new java.util.Random(partitionId.toLong)
       val actionRand = new java.util.Random(17L * partitionId + 7L)
       val amountRand = new java.util.Random(31L * partitionId + 11L)
+      val targetArray = targets.toArray
+      val multiplicityMap = scala.collection.mutable.HashMap.empty[(Long, Long), Long]
 
       loans.map { loan =>
-        val requests = ArrayBuffer.empty[(Int, LoanTransferRequest)]
         var count = 0
         while (count < DatagenParams.numLoanActions) {
           actionRand.nextInt(3) match {
@@ -366,107 +404,51 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
               }
             case _ =>
               withLoanAccount(loan, indexRand) { account =>
-                val shardId = indexRand.nextInt(shardCount)
-                requests += shardId -> LoanTransferRequest(
-                  loanId = loan.getLoanId,
-                  loanCreationDate = loan.getCreationDate,
-                  fromAccount = account,
-                  forward = actionRand.nextDouble() < 0.5,
-                  amount = amountRand.nextDouble() * DatagenParams.transferMaxAmount,
-                  candidateSeed = indexRand.nextLong(),
-                  eventSeed = indexRand.nextLong()
-                )
+                if (targetArray.nonEmpty) {
+                  val target = targetArray(indexRand.nextInt(targetArray.length))
+                  val forward = actionRand.nextDouble() < 0.5
+                  val amount = amountRand.nextDouble() * DatagenParams.transferMaxAmount
+                  if (forward) {
+                    if (!cannotTransfer(account, target)) {
+                      Transfer.createLoanTransfer(
+                        farm,
+                        account,
+                        target,
+                        loan,
+                        nextMultiplicity(multiplicityMap, account.getAccountId, target.getAccountId),
+                        amount
+                      )
+                    }
+                  } else {
+                    if (!cannotTransfer(target, account)) {
+                      Transfer.createLoanTransfer(
+                        farm,
+                        target,
+                        account,
+                        loan,
+                        nextMultiplicity(multiplicityMap, target.getAccountId, account.getAccountId),
+                        amount
+                      )
+                    }
+                  }
+                }
               }
           }
           count += 1
         }
-        LoanActionBundle(loan, requests.toVector)
+        LoanActivityBundle(
+          loanId = loan.getLoanId,
+          creationDate = loan.getCreationDate,
+          loanAmount = loan.getLoanAmount,
+          balance = loan.getBalance,
+          usage = loan.getUsage,
+          interestRate = loan.getInterestRate,
+          deposits = loan.getDeposits.asScala.toVector,
+          repays = loan.getRepays.asScala.toVector,
+          loanTransfers = loan.getLoanTransfers.asScala.toVector
+        )
       }
     }
-
-    val localLoans = actionBundles.map(_.loan)
-    val transferRequests = actionBundles.flatMap(_.transferRequests)
-
-    val transferTargets = accountRDD
-      .sample(
-        withReplacement = false,
-        DatagenParams.loanInvolvedAccountsFraction,
-        sampleRandom.nextLong()
-      )
-      .map(a => shardFor(a.getAccountId) -> new LoanTargetAccount(
-        a.getAccountId,
-        a.getCreationDate,
-        a.getDeletionDate,
-        a.isExplicitlyDeleted
-      ))
-
-    val loanTransfersByLoanId = transferRequests
-      .cogroup(transferTargets, shardPartitioner)
-      .flatMap { case (_, (requests, candidates)) =>
-        DatagenContext.initialize(config)
-        val candidateArray = candidates.iterator.toArray
-        if (candidateArray.isEmpty) {
-          Iterator.empty
-        } else {
-          val multiplicityMap = scala.collection.mutable.HashMap.empty[(Long, Long), Long]
-          requests.iterator.flatMap { request =>
-            val target = candidateArray(pickCandidateIndex(request.candidateSeed, candidateArray.length))
-            if (request.forward) {
-              if (cannotTransfer(request.fromAccount, target)) {
-                Iterator.empty
-              } else {
-                Iterator.single(
-                  request.loanId -> createLoanTransfer(
-                    request,
-                    target,
-                    nextMultiplicity(
-                      multiplicityMap,
-                      request.fromAccount.getAccountId,
-                      target.getAccountId
-                    )
-                  )
-                )
-              }
-            } else {
-              if (cannotTransfer(target, request.fromAccount)) {
-                Iterator.empty
-              } else {
-                Iterator.single(
-                  request.loanId -> createLoanTransfer(
-                    request,
-                    target,
-                    nextMultiplicity(
-                      multiplicityMap,
-                      target.getAccountId,
-                      request.fromAccount.getAccountId
-                    )
-                  )
-                )
-              }
-            }
-          }
-        }
-      }
-      .combineByKeyWithClassTag[ArrayBuffer[Transfer]](
-        (transfer: Transfer) => ArrayBuffer(transfer),
-        (buffer: ArrayBuffer[Transfer], transfer: Transfer) => {
-          buffer += transfer
-          buffer
-        },
-        (left: ArrayBuffer[Transfer], right: ArrayBuffer[Transfer]) => {
-          left ++= right
-          left
-        }
-      )
-
-    localLoans
-      .keyBy(_.getLoanId)
-      .leftOuterJoin(loanTransfersByLoanId)
-      .values
-      .map { case (loan, transfersOpt) =>
-        transfersOpt.foreach(_.foreach(loan.addLoanTransfer))
-        loan
-      }
   }
 
   private def shardFor(entityId: Long): Int =
@@ -520,44 +502,6 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
     val value = multiplicityMap.getOrElse(key, 0L)
     multiplicityMap.update(key, value + 1L)
     value
-  }
-
-  private def createLoanTransfer(
-      request: LoanTransferRequest,
-      target: LoanTargetAccount,
-      multiplicityId: Long
-  ): Transfer = {
-    val farm = new RandomGeneratorFarm()
-    farm.resetRandomGenerators(request.eventSeed)
-    val fragment = new Loan(
-      request.loanId,
-      0.0,
-      0.0,
-      request.loanCreationDate,
-      0L,
-      "",
-      0.0
-    )
-    if (request.forward) {
-      Transfer.createLoanTransfer(
-        farm,
-        request.fromAccount,
-        target,
-        fragment,
-        multiplicityId,
-        request.amount
-      )
-    } else {
-      Transfer.createLoanTransfer(
-        farm,
-        target,
-        request.fromAccount,
-        fragment,
-        multiplicityId,
-        request.amount
-      )
-    }
-    fragment.getLoanTransfers.get(0)
   }
 
   private def createWithdraw(

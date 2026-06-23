@@ -92,13 +92,12 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
     personWithAccGuaLoan.unpersist(blocking = true)
     companyWithAccGuaLoan.unpersist(blocking = true)
 
-    // loanWithActivitiesRdd is used 4 times within writeLoanActivities
-    // (loan, deposit, repay, loantransfer). Persist to avoid recomputing afterLoanSubEvents.
-    val loanWithActivitiesRdd =
-      activityGenerator.afterLoanSubEvents(loanRdd, accountRdd).persist(StorageLevel.DISK_ONLY)
+    // Persist a lightweight bundle instead of full Loan objects with account arrays.
+    val loanActivityBundles =
+      activityGenerator.loanActivitiesEvent(loanRdd, accountRdd).persist(StorageLevel.DISK_ONLY)
 
-    activitySerializer.writeLoanActivities(loanWithActivitiesRdd)
-    loanWithActivitiesRdd.unpersist(false)
+    activitySerializer.writeLoanActivityBundles(loanActivityBundles)
+    loanActivityBundles.unpersist(false)
     accountRdd.unpersist(false)
   }
 

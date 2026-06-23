@@ -18,6 +18,7 @@ package ldbc.finbench.datagen.generation.serializers
 
 import ldbc.finbench.datagen.entities.edges._
 import ldbc.finbench.datagen.entities.nodes._
+import ldbc.finbench.datagen.generation.generators.LoanActivityBundle
 import ldbc.finbench.datagen.io.raw.RawSink
 import ldbc.finbench.datagen.model.raw._
 import ldbc.finbench.datagen.syntax._
@@ -474,6 +475,99 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
     SparkUI.job("Write loan transfer", "Write Loan transfer") {
       val rawLoanTransfer = loanWithActivitiesRdd.flatMap { l =>
         l.getLoanTransfers.asScala.map { t: Transfer =>
+          TransferRaw(
+            t.getFromAccountId,
+            t.getToAccountId,
+            t.getMultiplicityId,
+            t.getCreationDate,
+            t.getDeletionDate,
+            formattedDouble(t.getAmount),
+            t.isExplicitlyDeleted,
+            t.getOrdernum,
+            t.getComment,
+            t.getPayType,
+            t.getGoodsType
+          )
+        }
+      }
+      spark
+        .createDataFrame(rawLoanTransfer)
+        .write
+        .format(sink.format.toString)
+        .options(options)
+        .save((pathPrefix / "loantransfer").toString)
+    }
+  }
+
+  def writeLoanActivityBundles(
+      loanActivityBundles: RDD[LoanActivityBundle]
+  )(implicit spark: SparkSession): Unit = {
+    SparkUI.job("Write loan", "Write Loan") {
+      val rawLoan = loanActivityBundles.map { l =>
+        LoanRaw(
+          l.loanId,
+          l.creationDate,
+          formattedDouble(l.loanAmount),
+          formattedDouble(l.balance),
+          l.usage,
+          f"${l.interestRate}%.3f"
+        )
+      }
+      spark
+        .createDataFrame(rawLoan)
+        .write
+        .format(sink.format.toString)
+        .options(options)
+        .save((pathPrefix / "loan").toString)
+    }
+
+    SparkUI.job("Write loan deposit", "Write Loan deposit") {
+      val rawDeposit = loanActivityBundles.flatMap { l =>
+        l.deposits.map { d =>
+          DepositRaw(
+            d.getLoanId,
+            d.getAccountId,
+            d.getCreationDate,
+            d.getDeletionDate,
+            formattedDouble(d.getAmount),
+            d.isExplicitlyDeleted,
+            d.getComment
+          )
+        }
+      }
+      spark
+        .createDataFrame(rawDeposit)
+        .write
+        .format(sink.format.toString)
+        .options(options)
+        .save((pathPrefix / "deposit").toString)
+    }
+
+    SparkUI.job("Write loan repay", "Write Loan repay") {
+      val rawRepay = loanActivityBundles.flatMap { l =>
+        l.repays.map { r =>
+          RepayRaw(
+            r.getAccountId,
+            r.getLoanId,
+            r.getCreationDate,
+            r.getDeletionDate,
+            formattedDouble(r.getAmount),
+            r.isExplicitlyDeleted,
+            r.getComment
+          )
+        }
+      }
+      spark
+        .createDataFrame(rawRepay)
+        .write
+        .format(sink.format.toString)
+        .options(options)
+        .save((pathPrefix / "repay").toString)
+    }
+
+    SparkUI.job("Write loan transfer", "Write Loan transfer") {
+      val rawLoanTransfer = loanActivityBundles.flatMap { l =>
+        l.loanTransfers.map { t =>
           TransferRaw(
             t.getFromAccountId,
             t.getToAccountId,
