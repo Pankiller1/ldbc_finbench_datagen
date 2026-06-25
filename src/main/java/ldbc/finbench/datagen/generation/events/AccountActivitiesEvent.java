@@ -105,29 +105,35 @@ public class AccountActivitiesEvent implements Serializable {
     // 2. HashMap replaces ConcurrentHashMap — avoids concurrent overhead (no concurrency needed)
     // 3. Algorithm logic is preserved exactly: same sequential scan, same termination, same random generators
     public List<Account> accountActivities(Account[] accounts, WithdrawCard[] cards, int blockId) {
+        return accountActivities(accounts, accounts, cards, blockId);
+    }
+
+    public List<Account> accountActivities(Account[] accounts, Account[] transferTargets, WithdrawCard[] cards,
+                                           int blockId) {
         resetState(blockId);
         Random pickAccountForWithdrawal = randomFarm.get(RandomGeneratorFarm.Aspect.ACCOUNT_WHETHER_WITHDRAW);
 
         int accountSize = accounts.length;
+        int targetSize = transferTargets.length;
         // Use primitive int[] instead of ArrayList<Integer> to avoid boxing overhead.
         // shiftRemove preserves the same element ordering as ArrayList.remove(index).
-        int[] availableToAccountIds = new int[accountSize];
-        int availableSize = accountSize;
-        for (int i = 0; i < accountSize; i++) {
+        int[] availableToAccountIds = new int[targetSize];
+        int availableSize = targetSize;
+        for (int i = 0; i < targetSize; i++) {
             availableToAccountIds[i] = i;
         }
-        maxSkippedCount = Math.min(maxSkippedCount, (int) (skippedRatio * accountSize));
+        int localMaxSkippedCount = Math.min(maxSkippedCount, (int) (skippedRatio * targetSize));
 
         int cardsize = cards.length;
         for (int fromIndex = 0; fromIndex < accountSize; fromIndex++) {
             Account from = accounts[fromIndex];
             // TRANSFER: account transfer to other accounts
-            while (from.getAvailableOutDegree() != 0) {
+            while (from.getAvailableOutDegree() != 0 && availableSize > 0) {
                 int skippedCount = 0;
                 for (int j = 0; j < availableSize; j++) {
                     int toIndex = availableToAccountIds[j];
-                    Account to = accounts[toIndex];
-                    if (toIndex == fromIndex || cannotTransfer(from, to)) {
+                    Account to = transferTargets[toIndex];
+                    if (cannotTransfer(from, to)) {
                         skippedCount++;
                         continue;
                     }
@@ -147,7 +153,7 @@ public class AccountActivitiesEvent implements Serializable {
                         break;
                     }
                 }
-                if (skippedCount >= Math.min(maxSkippedCount, availableSize)) {
+                if (skippedCount >= Math.min(localMaxSkippedCount, availableSize)) {
                     break;
                 }
             }

@@ -55,6 +55,7 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
   val loanGenerator = new LoanGenerator()
   private val shardCount: Int = Math.max(1, spark.sparkContext.defaultParallelism)
   private val shardPartitioner = new HashPartitioner(shardCount)
+  private val neighborFanout: Int = 1
 
   private case class SignInRequest(
       mediumId: Long,
@@ -171,6 +172,63 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       mediumRDD: RDD[Medium],
       accountRDD: RDD[Account]
   ): RDD[Medium] = {
+    val partitioner = new HashPartitioner(mediumRDD.partitions.length)
+    val accountTargets = accountRDD
+      .sample(
+        withReplacement = false,
+        DatagenParams.accountSignedInFraction,
+        sampleRandom.nextLong()
+      )
+      .mapPartitionsWithIndex { (partitionId, accounts) =>
+        accounts
+        .flatMap { a =>
+          neighborPartitionIds(partitionId, mediumRDD.partitions.length).map(_ -> new SignInTargetInfo(
+            a.getAccountId,
+            a.getCreationDate,
+            a.getDeletionDate,
+            a.isExplicitlyDeleted
+          ))
+        }
+      }
+      .partitionBy(partitioner)
+      .values
+
+    mediumRDD.zipPartitions(accountTargets) { (mediums, candidates) =>
+      DatagenContext.initialize(config)
+      val partitionId = TaskContext.getPartitionId()
+      val farm = new RandomGeneratorFarm()
+      farm.resetRandomGenerators(partitionId)
+      val accountsToSignRand = farm.get(RandomGeneratorFarm.Aspect.NUM_ACCOUNTS_SIGNIN_PER_MEDIUM)
+      val multiplicityRand = farm.get(RandomGeneratorFarm.Aspect.MULTIPLICITY_SIGNIN)
+      val candidateRand = new java.util.Random(partitionId.toLong)
+      val candidateArray = candidates.toArray
+      val numAccountsToSign = Math.max(1, accountsToSignRand.nextInt(DatagenParams.maxAccountToSignIn))
+
+      mediums.map { medium =>
+        if (candidateArray.nonEmpty) {
+          var count = 0
+          while (count < numAccountsToSign) {
+            val target = candidateArray(candidateRand.nextInt(candidateArray.length))
+            if (!cannotSignIn(medium.getCreationDate, target)) {
+              val multiplicity = Math.max(1, multiplicityRand.nextInt(DatagenParams.maxSignInPerPair))
+              var multiplicityId = 0
+              while (multiplicityId < multiplicity) {
+                SignIn.createSignIn(farm, multiplicityId, medium, target)
+                multiplicityId += 1
+              }
+            }
+            count += 1
+          }
+        }
+        medium
+      }
+    }
+  }
+
+  def mediumActivitesEventWithShardShuffle(
+      mediumRDD: RDD[Medium],
+      accountRDD: RDD[Account]
+  ): RDD[Medium] = {
     val accountTargets = accountRDD
       .sample(
         withReplacement = false,
@@ -259,13 +317,24 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
   }
 
   def accountActivitiesEvent(accountRDD: RDD[Account]): RDD[Account] = {
+    val partitioner = new HashPartitioner(accountRDD.partitions.length)
+    val transferTargets = accountRDD
+      .mapPartitionsWithIndex { (partitionId, accounts) =>
+        accounts.flatMap { account =>
+          neighborPartitionIds(partitionId, accountRDD.partitions.length).map(_ -> cloneAccountForTransferTarget(account))
+        }
+      }
+      .partitionBy(partitioner)
+      .values
+
     val accountActivitiesEvent = new AccountActivitiesEvent
-    accountRDD.mapPartitions { accountsIter =>
+    accountRDD.zipPartitions(transferTargets) { (accountsIter, targetsIter) =>
       DatagenContext.initialize(config)
       val partitionId = TaskContext.getPartitionId()
       accountActivitiesEvent
         .accountActivities(
           accountsIter.toArray,
+          targetsIter.toArray,
           Array.empty[WithdrawCard],
           partitionId
         )
@@ -279,15 +348,23 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
   }
 
   def withdrawActivitiesEvent(accountRDD: RDD[Account]): RDD[Withdraw] = {
+    val partitioner = new HashPartitioner(accountRDD.partitions.length)
     val cardsRDD: RDD[WithdrawCard] = accountRDD
-      .filter(_.getType == "debit card")
-      .map(a => new WithdrawCard(
-        a.getAccountId,
-        a.getType,
-        a.getCreationDate,
-        a.getDeletionDate,
-        a.isExplicitlyDeleted
-      ))
+      .mapPartitionsWithIndex { (partitionId, accounts) =>
+        accounts
+          .filter(_.getType == "debit card")
+          .flatMap { a =>
+            neighborPartitionIds(partitionId, accountRDD.partitions.length).map(_ -> new WithdrawCard(
+              a.getAccountId,
+              a.getType,
+              a.getCreationDate,
+              a.getDeletionDate,
+              a.isExplicitlyDeleted
+            ))
+          }
+      }
+      .partitionBy(partitioner)
+      .values
 
     accountRDD.zipPartitions(cardsRDD) { (accounts, cards) =>
       DatagenContext.initialize(config)
@@ -352,18 +429,25 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       loanRDD: RDD[Loan],
       accountRDD: RDD[Account]
   ): RDD[LoanActivityBundle] = {
+    val partitioner = new HashPartitioner(loanRDD.partitions.length)
     val transferTargets: RDD[LoanTargetAccount] = accountRDD
       .sample(
         withReplacement = false,
         DatagenParams.loanInvolvedAccountsFraction,
         sampleRandom.nextLong()
       )
-      .map(a => new LoanTargetAccount(
-        a.getAccountId,
-        a.getCreationDate,
-        a.getDeletionDate,
-        a.isExplicitlyDeleted
-      ))
+      .mapPartitionsWithIndex { (partitionId, accounts) =>
+        accounts.flatMap { a =>
+          neighborPartitionIds(partitionId, loanRDD.partitions.length).map(_ -> new LoanTargetAccount(
+            a.getAccountId,
+            a.getCreationDate,
+            a.getDeletionDate,
+            a.isExplicitlyDeleted
+          ))
+        }
+      }
+      .partitionBy(partitioner)
+      .values
 
     require(
       loanRDD.partitions.length == transferTargets.partitions.length,
@@ -453,6 +537,30 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
 
   private def shardFor(entityId: Long): Int =
     Math.floorMod(java.lang.Long.hashCode(entityId), shardCount)
+
+  private def neighborPartitionIds(partitionId: Int, partitionCount: Int): Iterator[Int] = {
+    if (partitionCount <= 0) {
+      Iterator.empty
+    } else {
+      val normalized = Math.floorMod(partitionId, partitionCount)
+      Iterator
+        .range(-neighborFanout, neighborFanout + 1)
+        .map(offset => Math.floorMod(normalized + offset, partitionCount))
+        .toSet
+        .iterator
+    }
+  }
+
+  private def cloneAccountForTransferTarget(account: Account): Account = {
+    val target = new Account()
+    target.setAccountId(account.getAccountId)
+    target.setType(account.getType)
+    target.setCreationDate(account.getCreationDate)
+    target.setDeletionDate(account.getDeletionDate)
+    target.setExplicitlyDeleted(account.isExplicitlyDeleted)
+    target.setMaxInDegree(account.getMaxInDegree)
+    target
+  }
 
   private def pickCandidateIndex(seed: Long, candidateCount: Int): Int = {
     val rand = new java.util.Random(seed)
