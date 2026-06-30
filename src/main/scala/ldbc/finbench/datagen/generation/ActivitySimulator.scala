@@ -39,6 +39,7 @@ class ActivitySimulator(sink: RawSink)(implicit spark: SparkSession)
 
   def simulate(config: DatagenConfiguration): Unit = {
     val activityGenerator = new ActivityGenerator(config)
+    implicit val activityConfig: DatagenConfiguration = config
 
     val personRdd =
       SparkPersonGenerator(DatagenParams.numPersons, config, blockSize)

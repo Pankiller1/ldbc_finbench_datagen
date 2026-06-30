@@ -172,7 +172,8 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       mediumRDD: RDD[Medium],
       accountRDD: RDD[Account]
   ): RDD[Medium] = {
-    val partitioner = new HashPartitioner(mediumRDD.partitions.length)
+    val mediumPartitionCount = mediumRDD.getNumPartitions
+    val partitioner = new HashPartitioner(mediumPartitionCount)
     val accountTargets = accountRDD
       .sample(
         withReplacement = false,
@@ -182,7 +183,7 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       .mapPartitionsWithIndex { (partitionId, accounts) =>
         accounts
         .flatMap { a =>
-          neighborPartitionIds(partitionId, mediumRDD.partitions.length).map(_ -> new SignInTargetInfo(
+          neighborPartitionIds(partitionId, mediumPartitionCount).map(_ -> new SignInTargetInfo(
             a.getAccountId,
             a.getCreationDate,
             a.getDeletionDate,
@@ -317,11 +318,12 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
   }
 
   def accountActivitiesEvent(accountRDD: RDD[Account]): RDD[Account] = {
-    val partitioner = new HashPartitioner(accountRDD.partitions.length)
+    val accountPartitionCount = accountRDD.getNumPartitions
+    val partitioner = new HashPartitioner(accountPartitionCount)
     val transferTargets = accountRDD
       .mapPartitionsWithIndex { (partitionId, accounts) =>
         accounts.flatMap { account =>
-          neighborPartitionIds(partitionId, accountRDD.partitions.length).map(_ -> cloneAccountForTransferTarget(account))
+          neighborPartitionIds(partitionId, accountPartitionCount).map(_ -> cloneAccountForTransferTarget(account))
         }
       }
       .partitionBy(partitioner)
@@ -348,13 +350,14 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
   }
 
   def withdrawActivitiesEvent(accountRDD: RDD[Account]): RDD[Withdraw] = {
-    val partitioner = new HashPartitioner(accountRDD.partitions.length)
+    val accountPartitionCount = accountRDD.getNumPartitions
+    val partitioner = new HashPartitioner(accountPartitionCount)
     val cardsRDD: RDD[WithdrawCard] = accountRDD
       .mapPartitionsWithIndex { (partitionId, accounts) =>
         accounts
           .filter(_.getType == "debit card")
           .flatMap { a =>
-            neighborPartitionIds(partitionId, accountRDD.partitions.length).map(_ -> new WithdrawCard(
+            neighborPartitionIds(partitionId, accountPartitionCount).map(_ -> new WithdrawCard(
               a.getAccountId,
               a.getType,
               a.getCreationDate,
@@ -429,7 +432,8 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       loanRDD: RDD[Loan],
       accountRDD: RDD[Account]
   ): RDD[LoanActivityBundle] = {
-    val partitioner = new HashPartitioner(loanRDD.partitions.length)
+    val loanPartitionCount = loanRDD.getNumPartitions
+    val partitioner = new HashPartitioner(loanPartitionCount)
     val transferTargets: RDD[LoanTargetAccount] = accountRDD
       .sample(
         withReplacement = false,
@@ -438,7 +442,7 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       )
       .mapPartitionsWithIndex { (partitionId, accounts) =>
         accounts.flatMap { a =>
-          neighborPartitionIds(partitionId, loanRDD.partitions.length).map(_ -> new LoanTargetAccount(
+          neighborPartitionIds(partitionId, loanPartitionCount).map(_ -> new LoanTargetAccount(
             a.getAccountId,
             a.getCreationDate,
             a.getDeletionDate,
@@ -450,8 +454,8 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       .values
 
     require(
-      loanRDD.partitions.length == transferTargets.partitions.length,
-      s"loanRDD partitions (${loanRDD.partitions.length}) must match account target partitions (${transferTargets.partitions.length})"
+      loanPartitionCount == transferTargets.getNumPartitions,
+      s"loanRDD partitions ($loanPartitionCount) must match account target partitions (${transferTargets.getNumPartitions})"
     )
 
     loanRDD.zipPartitions(transferTargets) { (loans, targets) =>

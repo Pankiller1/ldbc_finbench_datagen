@@ -16,8 +16,10 @@
 
 package ldbc.finbench.datagen.generation.serializers
 
+import ldbc.finbench.datagen.config.DatagenConfiguration
 import ldbc.finbench.datagen.entities.edges._
 import ldbc.finbench.datagen.entities.nodes._
+import ldbc.finbench.datagen.generation.DatagenContext
 import ldbc.finbench.datagen.generation.generators.LoanActivityBundle
 import ldbc.finbench.datagen.io.raw.RawSink
 import ldbc.finbench.datagen.model.raw._
@@ -217,19 +219,23 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
   }
 
   def writeMediumWithActivities(media: RDD[Medium])(implicit
-      spark: SparkSession
+      spark: SparkSession,
+      config: DatagenConfiguration
   ): Unit = {
     // Write medium
     SparkUI.job("Write medium", "Write Medium") {
-      val rawMedium = media.map { m: Medium =>
-        MediumRaw(
-          m.getMediumId,
-          m.getCreationDate,
-          m.getMediumName,
-          m.isBlocked,
-          m.getLastLogin,
-          m.getRiskLevel
-        )
+      val rawMedium = media.mapPartitions { iter =>
+        DatagenContext.initialize(config)
+        iter.map { m: Medium =>
+          MediumRaw(
+            m.getMediumId,
+            m.getCreationDate,
+            m.getMediumName,
+            m.isBlocked,
+            m.getLastLogin,
+            m.getRiskLevel
+          )
+        }
       }
       spark
         .createDataFrame(rawMedium)
@@ -240,18 +246,21 @@ class ActivitySerializer(sink: RawSink)(implicit spark: SparkSession)
     }
     // Write media signin
     SparkUI.job("Write media signin", "Write Medium sign in") {
-      val rawSignIn = media.flatMap { m =>
-        m.getSignIns.asScala.map { si =>
-          SignInRaw(
-            si.getMediumId,
-            si.getAccountId,
-            si.getMultiplicityId,
-            si.getCreationDate,
-            si.getDeletionDate,
-            si.isExplicitlyDeleted,
-            si.getLocation,
-            si.getComment
-          )
+      val rawSignIn = media.mapPartitions { iter =>
+        DatagenContext.initialize(config)
+        iter.flatMap { m =>
+          m.getSignIns.asScala.map { si =>
+            SignInRaw(
+              si.getMediumId,
+              si.getAccountId,
+              si.getMultiplicityId,
+              si.getCreationDate,
+              si.getDeletionDate,
+              si.isExplicitlyDeleted,
+              si.getLocation,
+              si.getComment
+            )
+          }
         }
       }
       spark
