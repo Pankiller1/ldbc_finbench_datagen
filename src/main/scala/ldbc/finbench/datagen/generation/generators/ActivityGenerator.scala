@@ -202,7 +202,7 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       val accountsToSignRand = farm.get(RandomGeneratorFarm.Aspect.NUM_ACCOUNTS_SIGNIN_PER_MEDIUM)
       val multiplicityRand = farm.get(RandomGeneratorFarm.Aspect.MULTIPLICITY_SIGNIN)
       val candidateRand = new java.util.Random(partitionId.toLong)
-      val candidateArray = candidates.toArray
+      val candidateArray = candidates.toArray.sortBy(_.getAccountId)
       val numAccountsToSign = Math.max(1, accountsToSignRand.nextInt(DatagenParams.maxAccountToSignIn))
 
       mediums.map { medium =>
@@ -271,11 +271,13 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       .cogroup(accountTargets, shardPartitioner)
       .flatMap { case (_, (requests, candidates)) =>
         DatagenContext.initialize(config)
-        val candidateArray = candidates.iterator.toArray
+        val candidateArray = candidates.iterator.toArray.sortBy(_.getAccountId)
         if (candidateArray.isEmpty) {
           Iterator.empty
         } else {
-          requests.iterator.flatMap { request =>
+          requests.iterator.toArray.sortBy(request =>
+            (request.mediumId, request.candidateSeed, request.eventSeed)
+          ).iterator.flatMap { request =>
             val target = candidateArray(pickCandidateIndex(request.candidateSeed, candidateArray.length))
             if (cannotSignIn(request.mediumCreationDate, target)) {
               Iterator.empty
@@ -329,14 +331,14 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       .partitionBy(partitioner)
       .values
 
-    val accountActivitiesEvent = new AccountActivitiesEvent
     accountRDD.zipPartitions(transferTargets) { (accountsIter, targetsIter) =>
       DatagenContext.initialize(config)
       val partitionId = TaskContext.getPartitionId()
+      val accountActivitiesEvent = new AccountActivitiesEvent
       accountActivitiesEvent
         .accountActivities(
           accountsIter.toArray,
-          targetsIter.toArray,
+          targetsIter.toArray.sortBy(_.getAccountId),
           Array.empty[WithdrawCard],
           partitionId
         )
@@ -376,7 +378,7 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       farm.resetRandomGenerators(partitionId)
       val pickAccountForWithdrawal = farm.get(RandomGeneratorFarm.Aspect.ACCOUNT_WHETHER_WITHDRAW)
       val cardIndexRand = new java.util.Random(partitionId.toLong)
-      val cardArray = cards.toArray
+      val cardArray = cards.toArray.sortBy(_.getAccountId)
       val multiplicityMap = scala.collection.mutable.HashMap.empty[(Long, Long), Long]
 
       accounts.flatMap { account =>
@@ -466,7 +468,7 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       val indexRand = new java.util.Random(partitionId.toLong)
       val actionRand = new java.util.Random(17L * partitionId + 7L)
       val amountRand = new java.util.Random(31L * partitionId + 11L)
-      val targetArray = targets.toArray
+      val targetArray = targets.toArray.sortBy(_.getAccountId)
       val multiplicityMap = scala.collection.mutable.HashMap.empty[(Long, Long), Long]
 
       loans.map { loan =>
@@ -550,7 +552,8 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
       Iterator
         .range(-neighborFanout, neighborFanout + 1)
         .map(offset => Math.floorMod(normalized + offset, partitionCount))
-        .toSet
+        .toSeq
+        .distinct
         .iterator
     }
   }
