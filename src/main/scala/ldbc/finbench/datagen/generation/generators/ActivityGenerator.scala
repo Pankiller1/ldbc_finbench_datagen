@@ -320,25 +320,13 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
   }
 
   def accountActivitiesEvent(accountRDD: RDD[Account]): RDD[Account] = {
-    val accountPartitionCount = accountRDD.getNumPartitions
-    val partitioner = new HashPartitioner(accountPartitionCount)
-    val transferTargets = accountRDD
-      .mapPartitionsWithIndex { (partitionId, accounts) =>
-        accounts.flatMap { account =>
-          neighborPartitionIds(partitionId, accountPartitionCount).map(_ -> cloneAccountForTransferTarget(account))
-        }
-      }
-      .partitionBy(partitioner)
-      .values
-
-    accountRDD.zipPartitions(transferTargets) { (accountsIter, targetsIter) =>
+    accountRDD.mapPartitions { accountsIter =>
       DatagenContext.initialize(config)
       val partitionId = TaskContext.getPartitionId()
       val accountActivitiesEvent = new AccountActivitiesEvent
       accountActivitiesEvent
         .accountActivities(
           accountsIter.toArray,
-          targetsIter.toArray.sortBy(_.getAccountId),
           Array.empty[WithdrawCard],
           partitionId
         )
@@ -556,17 +544,6 @@ class ActivityGenerator(config: DatagenConfiguration)(implicit spark: SparkSessi
         .distinct
         .iterator
     }
-  }
-
-  private def cloneAccountForTransferTarget(account: Account): Account = {
-    val target = new Account()
-    target.setAccountId(account.getAccountId)
-    target.setType(account.getType)
-    target.setCreationDate(account.getCreationDate)
-    target.setDeletionDate(account.getDeletionDate)
-    target.setExplicitlyDeleted(account.isExplicitlyDeleted)
-    target.setMaxInDegree(account.getMaxInDegree)
-    target
   }
 
   private def pickCandidateIndex(seed: Long, candidateCount: Int): Int = {
